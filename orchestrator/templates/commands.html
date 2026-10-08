@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Команды{% endblock %}
+{% block content %}
+<h2 style="margin-bottom:15px;">Команды</h2>
+
+<p style="margin-bottom:15px;font-size:13px;color:#666;">
+    Временная страница — команды для задач в статусе
+    <span class="status status-ready_for_edit">ready_for_edit</span>.
+    Скопируй нужную команду в CLI.
+</p>
+
+<form method="post" action="{{ url_for('main.commands_generate') }}"
+      style="margin-bottom:15px;">
+    <button type="submit">🔄 Сгенерировать команды</button>
+</form>
+
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Сессия</th>
+            <th>Название</th>
+            <th>Статус</th>
+            <th>Команда</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for cmd in commands %}
+        <tr>
+            <td>{{ cmd.id }}</td>
+            <td>{{ cmd.session.external_id if cmd.session else '—' }}</td>
+            <td style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                title="{{ cmd.session.title if cmd.session else '' }}">
+                {{ cmd.session.title[:60] if cmd.session else '—' }}
+            </td>
+            <td>
+                <span class="status status-{{ cmd.status }}">{{ cmd.status }}</span>
+            </td>
+            <td style="max-width:400px;">
+                <code style="font-size:11px;word-break:break-all;display:block;">
+                    {{ cmd.command }}
+                </code>
+            </td>
+            <td>
+                <button type="button" class="copy-btn"
+                        data-command="{{ cmd.command|e }}"
+                        style="font-size:11px;padding:4px 8px;background:#555;color:#fff;border:none;border-radius:3px;cursor:pointer;">
+                    Копировать
+                </button>
+            </td>
+        </tr>
+        {% else %}
+        <tr>
+            <td colspan="6" style="text-align:center;padding:30px;color:#999;">
+                Нет команд. Нажми «Сгенерировать команды» (нужны сессии в ready_for_edit).
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<script>
+document.querySelectorAll(".copy-btn").forEach(function(btn) {
+    btn.addEventListener("click", function() {
+        var text = btn.getAttribute("data-command");
+        navigator.clipboard.writeText(text).then(function() {
+            var original = btn.textContent;
+            btn.textContent = "✅ Скопировано";
+            setTimeout(function() { btn.textContent = original; }, 1500);
+        }).catch(function() {
+            alert("Не удалось скопировать. Скопируй вручную.");
+        });
+    });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% block title %}Дашборд{% endblock %}
+{% block content %}
+<h2 style="margin-bottom:15px;">Дашборд</h2>
+
+<!-- ====================================================================== -->
+<!-- ФИЛЬТРЫ                                                                  -->
+<!-- ====================================================================== -->
+<form method="get" style="margin-bottom:15px;
+      display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;
+      background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:12px;">
+
+    <div>
+        <label style="display:block;font-size:11px;color:#888;margin-bottom:2px;">Мин. дата:</label>
+        <input type="date" name="min_date" value="{{ min_date or '' }}" style="width:130px;">
+    </div>
+    <div>
+        <label style="display:block;font-size:11px;color:#888;margin-bottom:2px;">Макс. дата:</label>
+        <input type="date" name="max_date" value="{{ min_date or '' }}" style="width:130px;">
+    </div>
+
+    <div>
+        <label style="display:block;font-size:11px;color:#888;margin-bottom:2px;">Цвет:</label>
+        <select name="color" id="color-filter-select" style="min-width:140px;">
+            <option value="">Все цвета</option>
+        </select>
+    </div>
+
+    <div>
+        <label style="display:block;font-size:11px;color:#888;margin-bottom:2px;">Курс:</label>
+        <select name="course_id" style="min-width:160px;">
+            <option value="">Все курсы</option>
+            {% for c in courses %}
+            <option value="{{ c.id }}" {% if course_filter == c.id|string %}selected{% endif %}>
+                {{ c.name }} ({{ c.course_type }})
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div>
+        <label style="display:block;font-size:11px;color:#888;margin-bottom:2px;">Тип курса:</label>
+        <select name="course_type" style="min-width:140px;">
+            <option value="">Все типы</option>
+            {% for ct in course_types %}
+            <option value="{{ ct }}" {% if type_filter == ct %}selected{% endif %}>{{ ct }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <button type="submit" style="background:#555;">🔍 Фильтровать</button>
+
+    {% if min_date or color_filter or course_filter or type_filter %}
+    <a href="{{ url_for('main.dashboard') }}"
+       style="text-decoration:none;font-size:12px;color:#555;align-self:center;">✕ сбросить</a>
+    {% endif %}
+</form>
+
+<!-- ====================================================================== -->
+<!-- ТАБЛИЦА                                                                  -->
+<!-- ====================================================================== -->
+<table>
+    <thead>
+        <tr>
+            <th style="width:20px;"></th>
+            <th>ext_id</th>
+            <th>Комната</th>
+            <th>Название</th>
+            <th>Автор</th>
+            <th>Дата</th>
+            <th>Курс</th>
+            <th>Статус</th>
+            <th>Пути</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for s in sessions %}
+        <tr data-session-id="{{ s.id }}"
+            data-status="{{ s.status }}"
+            style="background:{{ attention_color(s) }};">
+            <td style="background:{{ status_color(s.status) }};width:20px;min-width:20px;"></td>
+            <td>{{ s.external_id }}</td>
+            <td>{{ s.room }}</td>
+            <td style="max-width:300px;">
+                <a href="{{ url_for('main.edit_session', session_id=s.id) }}"
+                   style="text-decoration:none;color:inherit;">
+                    {{ s.title[:80] }}{% if s.title|length > 80 %}…{% endif %}
+                </a>
+            </td>
+            <td>{{ s.author[:40] if s.author else '—' }}</td>
+            <td style="white-space:nowrap;">{{ s.date.strftime('%d.%m.%Y') if s.date else '—' }}</td>
+            <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                title="{{ s.course.name if s.course else '' }}">
+                {{ s.course.name if s.course else '—' }}
+            </td>
+            <td>
+                <span class="status status-{{ s.status }}"
+                      style="font-size:11px;white-space:nowrap;">{{ s.status }}</span>
+            </td>
+            <td>
+                <span id="path-status-{{ s.id }}" style="font-size:11px;">—</span>
+            </td>
+            <td>
+                <a href="{{ url_for('main.edit_session', session_id=s.id) }}"
+                   title="Редактировать">✎</a>
+            </td>
+        </tr>
+        {% else %}
+        <tr>
+            <td colspan="9" style="text-align:center;padding:40px;color:#999;">
+                {% if min_date or color_filter or course_filter or type_filter %}
+                    Нет записей по фильтрам.
+                {% else %}
+                    Нет записей. Создай первую через <a href="{{ url_for('main.import_sessions') }}">импорт</a>.
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<!-- ====================================================================== -->
+<!-- JS: проверка путей + загрузка цветов для фильтра                         -->
+<!-- ====================================================================== -->
+<script>
+// --- Проверка путей ---
+document.addEventListener("DOMContentLoaded", function() {
+    {% for s in sessions %}
+    {% if s.status in ('received', 'ready_for_edit', 'ready_for_upload', 'done') %}
+    (function(sid) {
+        fetch("/api/validate-session-path/" + sid)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var el = document.getElementById("path-status-" + sid);
+                if (!el) return;
+                var src = data.source || {};
+                var out = data.output || {};
+                var parts = [];
+                if (src.full_path) parts.push(src.exists ? "📁" : "❌");
+                if (out.dir_exists !== undefined) parts.push(out.dir_exists ? "📤" : "❌");
+                el.innerHTML = parts.join(" ");
+                el.title =
+                    "Source: " + (src.full_path || "—") + " (" + (src.exists ? "OK" : "нет") + ")\n" +
+                    "Output: " + (out.full_path || "—") + " (dir: " + (out.dir_exists ? "OK" : "нет") + ")";
+            })
+            .catch(function() {
+                document.getElementById("path-status-" + sid).innerHTML = "⚠";
+            });
+    })({{ s.id }});
+    {% endif %}
+    {% endfor %}
+});
+
+// --- Загрузка цветов для фильтра ---
+fetch("/api/attention-colors")
+    .then(function(r) { return r.json(); })
+    .then(function(colors) {
+        var sel = document.getElementById("color-filter-select");
+        if (!sel) return;
+
+        colors.forEach(function(item) {
+            var opt = document.createElement("option");
+            opt.value = item.color;
+
+            // Фон опции = цвет
+            opt.style.backgroundColor = item.color;
+
+            // Контрастность текста
+            var hex = item.color.replace("#", "");
+            var r = parseInt(hex.substring(0,2), 16);
+            var g = parseInt(hex.substring(2,4), 16);
+            var b = parseInt(hex.substring(4,6), 16);
+            var brightness = (r*299 + g*587 + b*114) / 1000;
+            opt.style.color = brightness > 150 ? "#333" : "#fff";
+
+            opt.textContent = item.color + " (" + item.count + ")";
+            sel.appendChild(opt);
+
+            // Восстановить выбранный фильтр
+            if (item.color === "{{ color_filter }}") {
+                opt.selected = true;
+            }
+        });
+    })
+    .catch(function(err) {
+        console.error("Не удалось загрузить цвета:", err);
+    });
+</script>
+{% endblock %}

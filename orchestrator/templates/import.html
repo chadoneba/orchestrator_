@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Импорт записей{% endblock %}
+{% block content %}
+
+<!-- ====================================================================== -->
+<!-- ЭТАП 1: форма URL                                                       -->
+<!-- ====================================================================== -->
+{% if phase == 1 %}
+<h2 style="margin-bottom:15px;">Импорт записей — Этап 1: URL</h2>
+
+<form method="post" style="max-width:600px;">
+    <input type="hidden" name="action" value="parse">
+
+    <div style="display:flex;flex-direction:column;gap:12px;">
+        <div>
+            <label style="display:block;margin-bottom:3px;">URL страницы конференции:</label>
+            <input type="text" name="url"
+                   placeholder="https://www.mathnet.ru/php/conference.phtml?confid=2740"
+                   style="width:100%;" required>
+        </div>
+
+        <div>
+            <label style="display:block;margin-bottom:3px;">Минимальная дата (опционально):</label>
+            <input type="date" name="min_date">
+        </div>
+
+        <button type="submit">Загрузить и показать</button>
+    </div>
+</form>
+
+<!-- ====================================================================== -->
+<!-- ЭТАП 2: закреплённая панель + редактируемая таблица                     -->
+<!-- ====================================================================== -->
+{% elif phase == 2 %}
+<h2 style="margin-bottom:5px;">Импорт записей — Этап 2: правки и сохранение</h2>
+<p style="font-size:12px;color:#888;margin-bottom:15px;">
+    Источник: {{ parsed_url }} | Записей: {{ parsed_count }}
+    &nbsp;| <a href="/import">← другой URL</a>
+</p>
+
+<form method="post">
+    <input type="hidden" name="action" value="save">
+    <input type="hidden" name="record_count" value="{{ records|length }}">
+
+    <!-- Закреплённая панель -->
+    <div style="
+        position: sticky; top: 0; z-index: 10;
+        background: #fff; border: 1px solid #ddd; border-radius: 8px;
+        padding: 15px; margin-bottom: 15px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    ">
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+            <div>
+                <label style="display:block;margin-bottom:3px;font-size:13px;">Название курса:</label>
+                <input type="text" name="course_name" placeholder="Название">
+            </div>
+            <div>
+                <label style="display:block;margin-bottom:3px;font-size:13px;">Тип курса:</label>
+                <input type="text" name="course_type" placeholder="напр. лекции">
+            </div>
+            <div>
+                <label style="display:block;margin-bottom:3px;font-size:13px;">Дофильтр по дате:</label>
+                <input type="date" name="min_date">
+            </div>
+            <button type="submit">💾 Сохранить в базу</button>
+        </div>
+        <p style="margin-top:8px;font-size:11px;color:#999;">
+            Курс с таким названием+типом будет найден или создан автоматически.
+        </p>
+    </div>
+
+    <!-- Редактируемая таблица -->
+    <table>
+        <thead>
+            <tr>
+                <th>ext_id</th>
+                <th>Название (title)</th>
+                <th>Автор (author)</th>
+                <th>Дата</th>
+                <th>Время</th>
+                <th>Аудитория</th>
+                <th>Статус</th>
+            </tr>
+        </thead>
+        <tbody>
+            <input type="hidden" name="source_url" id="source-url-input" value="{{ parsed_url }}">
+            {% for r in records %}
+            <tr>
+                <!-- Скрытые поля для передачи неизменяемых данных -->
+                <input type="hidden" name="ext_id_{{ loop.index0 }}" value="{{ r.external_id }}">
+                <input type="hidden" name="date_{{ loop.index0 }}" value="{{ r.date }}">
+                <input type="hidden" name="status_{{ loop.index0 }}" value="{{ r.status }}">
+
+                <td style="vertical-align:middle;">{{ r.external_id }}</td>
+                <td>
+                    <input type="text" name="title_{{ loop.index0 }}"
+                           value="{{ r.title|e }}"
+                           style="width:100%; min-width:250px; padding:5px; border:1px solid #ccc; border-radius:3px;">
+                </td>
+                <td>
+                    <input type="text" name="author_{{ loop.index0 }}"
+                           value="{{ r.author|e }}"
+                           placeholder="впиши автора"
+                           style="width:100%; min-width:150px; padding:5px; border:1px solid #ccc; border-radius:3px;">
+                </td>
+                <td>{{ r.date }}</td>
+                <td>{{ r.get('time_range', '—') }}</td>
+                <td>{{ r.get('room', '—') }}</td>
+                <td>{{ r.get('status', '—') }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</form>
+
+{% endif %}
+{% endblock %}

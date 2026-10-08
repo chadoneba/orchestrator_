@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}Курсы{% endblock %}
+{% block content %}
+<h2 style="margin-bottom:15px;">Курсы</h2>
+
+<p style="margin-bottom:15px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+    <a href="{{ url_for('main.import_sessions') }}" class="btn" style="text-decoration:none;">
+        Создать курс (через импорт)
+    </a>
+    <button type="button" id="btn-check-all"
+            style="background:#1565c0;">
+        🔄 Обновить все курсы
+    </button>
+    <span id="check-all-status" style="font-size:12px;color:#888;"></span>
+</p>
+
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Название</th>
+            <th>Тип</th>
+            <th>Source path</th>
+            <th>Output path</th>
+            <th>Записей</th>
+            <th></th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for c in courses %}
+        <tr>
+            <td>{{ c.id }}</td>
+            <td>{{ c.name }}</td>
+            <td>{{ c.course_type }}</td>
+            <td style="font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                title="{{ c.source_file_path }}">{{ c.source_file_path or '—' }}</td>
+            <td style="font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                title="{{ c.output_file_path }}">{{ c.output_file_path or '—' }}</td>
+            <td>{{ c.sessions.count() }}</td>
+            <td>
+                <a href="{{ url_for('main.edit_course', course_id=c.id) }}">✎</a>
+            </td>
+            <td>
+                <button type="button"
+                        class="btn-check-updates"
+                        data-course-id="{{ c.id }}"
+                        data-course-name="{{ c.name|e }}"
+                        {% if not c.source_url %}disabled title="Не задан source_url"{% endif %}
+                        style="font-size:11px;padding:4px 10px;
+                               {% if not c.source_url %}opacity:0.4;{% else %}background:#1565c0;{% endif %}">
+                    🔄 Проверить
+                </button>
+            </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" style="text-align:center;padding:30px;color:#999;">
+            Нет курсов. Создай первый через импорт записей.
+        </td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<!-- Лог обновлений -->
+<div id="update-log-container"
+     style="display:none;margin-top:20px;background:#fff;border:1px solid #e0e0e0;
+            border-radius:8px;overflow:hidden;">
+    <div style="background:#f5f5f5;padding:10px 15px;font-weight:600;font-size:14px;
+                display:flex;justify-content:space-between;align-items:center;
+                border-bottom:1px solid #e0e0e0;">
+        <span>📋 Лог проверки: <span id="update-log-title"></span></span>
+        <button type="button" id="btn-close-log"
+                style="background:transparent;border:none;font-size:16px;cursor:pointer;">✕</button>
+    </div>
+    <div id="update-log-body" style="padding:15px;max-height:400px;overflow-y:auto;
+                font-family:monospace;font-size:12px;line-height:1.6;">
+    </div>
+    <div id="update-log-summary"
+         style="padding:10px 15px;border-top:1px solid #e0e0e0;font-size:12px;color:#888;">
+    </div>
+</div>
+
+<script>
+document.querySelectorAll(".btn-check-updates").forEach(function(btn) {
+    btn.addEventListener("click", function() {
+        var courseId = btn.getAttribute("data-course-id");
+        var courseName = btn.getAttribute("data-course-name");
+
+        var logContainer = document.getElementById("update-log-container");
+        var logTitle = document.getElementById("update-log-title");
+        var logBody = document.getElementById("update-log-body");
+        var logSummary = document.getElementById("update-log-summary");
+
+        logContainer.style.display = "block";
+        logTitle.textContent = courseName;
+        logBody.innerHTML = "<div style='color:#888;'>⏳ Проверяю обновления...</div>";
+        logSummary.textContent = "";
+
+        // Блокируем кнопку
+        btn.disabled = true;
+        btn.textContent = "⏳";
+
+        fetch("/api/check-course-updates/" + courseId, { method: "POST" })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.error) {
+                    logBody.innerHTML = '<div style="color:#c62828;">❌ ' + data.error + '</div>';
+                    logSummary.textContent = "Ошибка";
+                    return;
+                }
+
+                // Лог
+                var html = "";
+                data.log.forEach(function(line) {
+                    var color = "#333";
+                    if (line.startsWith("➕")) color = "#2e7d32";
+                    else if (line.startsWith("❌")) color = "#c62828";
+                    else if (line.startsWith("✏️")) color = "#e65100";
+                    else if (line.startsWith("✅")) color = "#1565c0";
+                    html += '<div style="color:' + color + ';">' + line + '</div>';
+                });
+                logBody.innerHTML = html || '<div style="color:#999;">Пусто</div>';
+
+                // Сводка
+                var parts = [];
+                if (data.new > 0) parts.push('➕ новых: ' + data.new);
+                if (data.removed > 0) parts.push('❌ удалено: ' + data.removed);
+                if (data.changed > 0) parts.push('✏️ изменено: ' + data.changed);
+                if (parts.length === 0) parts.push('Без изменений');
+                logSummary.textContent =
+                    "Всего в источнике: " + data.parsed_count +
+                    " | В базе было: " + data.existing_count +
+                    " | " + parts.join(", ");
+
+                // Обновить количество записей в таблице
+                if (data.new > 0 || data.removed > 0) {
+                    setTimeout(function() { location.reload(); }, 2000);
+                }
+            })
+            .catch(function(err) {
+                logBody.innerHTML = '<div style="color:#c62828;">❌ Ошибка сети: ' + err + '</div>';
+                logSummary.textContent = "Ошибка";
+            })
+            .finally(function() {
+                btn.disabled = !btn.hasAttribute("data-source-url");
+                btn.textContent = "🔄 Проверить";
+            });
+    });
+});
+
+// Закрыть лог
+document.getElementById("btn-close-log").addEventListener("click", function() {
+    document.getElementById("update-log-container").style.display = "none";
+});
+
+// --- Обновить все курсы ---
+document.getElementById("btn-check-all").addEventListener("click", function() {
+    var btn = document.getElementById("btn-check-all");
+    var statusEl = document.getElementById("check-all-status");
+    var logContainer = document.getElementById("update-log-container");
+    var logTitle = document.getElementById("update-log-title");
+    var logBody = document.getElementById("update-log-body");
+    var logSummary = document.getElementById("update-log-summary");
+
+    btn.disabled = true;
+    btn.textContent = "⏳ Проверяю...";
+    statusEl.textContent = "";
+
+    logContainer.style.display = "block";
+    logTitle.textContent = "Все курсы";
+    logBody.innerHTML = "<div style='color:#888;'>⏳ Проверяю все курсы...</div>";
+    logSummary.textContent = "";
+
+    fetch("/api/check-all-courses", { method: "POST" })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error) {
+                logBody.innerHTML = '<div style="color:#c62828;">❌ ' + data.error + '</div>';
+                return;
+            }
+
+            var html = "";
+            data.log.forEach(function(line) {
+                var color = "#333";
+                if (line.startsWith("➕") || line.includes("➕")) color = "#2e7d32";
+                else if (line.startsWith("❌") || line.includes("❌")) color = "#c62828";
+                else if (line.startsWith("✏️") || line.includes("✏️")) color = "#e65100";
+                else if (line.startsWith("✅") || line.includes("✅")) color = "#1565c0";
+                html += '<div style="color:' + color + ';">' + line + '</div>';
+            });
+            logBody.innerHTML = html;
+
+            var parts = [];
+            if (data.new > 0) parts.push('➕ новых: ' + data.new);
+            if (data.removed > 0) parts.push('❌ удалено: ' + data.removed);
+            if (data.changed > 0) parts.push('✏️ изменено: ' + data.changed);
+            if (parts.length === 0) parts.push('Без изменений');
+            logSummary.textContent =
+                "Проверено курсов: " + data.courses_checked +
+                " | Записей в источниках: " + data.total_parsed +
+                " | " + parts.join(", ");
+
+            if (data.errors.length > 0) {
+                logSummary.textContent += " | ⚠ ошибок: " + data.errors.length;
+            }
+
+            statusEl.textContent = "Готово";
+            statusEl.style.color = "#2e7d32";
+
+            if (data.new > 0 || data.removed > 0) {
+                setTimeout(function() { location.reload(); }, 2500);
+            }
+        })
+        .catch(function(err) {
+            logBody.innerHTML = '<div style="color:#c62828;">❌ Ошибка: ' + err + '</div>';
+            statusEl.textContent = "Ошибка";
+            statusEl.style.color = "#c62828";
+        })
+        .finally(function() {
+            btn.disabled = false;
+            btn.textContent = "🔄 Обновить все курсы";
+        });
+});
+
+</script>
+{% endblock %}

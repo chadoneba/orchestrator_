@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Лог изменений{% endblock %}
+{% block content %}
+<h2 style="margin-bottom:15px;">Лог изменений</h2>
+
+<!-- Фильтр -->
+<form method="get" style="margin-bottom:15px;display:flex;gap:10px;align-items:flex-end;
+      background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:12px;">
+    <div>
+        <label style="display:block;font-size:11px;color:#888;margin-bottom:2px;">Курс:</label>
+        <select name="course_id" style="min-width:180px;">
+            <option value="">Все курсы</option>
+            {% for c in courses %}
+            <option value="{{ c.id }}" {% if course_filter == c.id|string %}selected{% endif %}>
+                {{ c.name }} ({{ c.course_type }})
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+    <button type="submit" style="background:#555;">🔍 Фильтровать</button>
+    {% if course_filter %}
+    <a href="{{ url_for('main.log_page') }}"
+       style="text-decoration:none;font-size:12px;color:#555;align-self:center;">✕ сбросить</a>
+    {% endif %}
+</form>
+
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Дата</th>
+            <th>Курс</th>
+            <th>Сессия</th>
+            <th>Название</th>
+            <th>Изменения</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for u in updates.items %}
+        <tr>
+            <td>{{ u.id }}</td>
+            <td style="white-space:nowrap;font-size:12px;">
+                {{ u.created_at.strftime('%d.%m.%Y %H:%M') if u.created_at else '—' }}
+            </td>
+            <td>
+                {% if u.session and u.session.course %}
+                    {{ u.session.course.name }}
+                {% else %}—{% endif %}
+            </td>
+            <td>{{ u.session.external_id if u.session else '—' }}</td>
+            <td style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                title="{{ u.session.title if u.session else '' }}">
+                {{ u.session.title[:70] if u.session else '—' }}
+            </td>
+            <td style="font-size:12px;max-width:400px;">
+                {% set old = u.get_old() %}
+                {% set new = u.get_new() %}
+                {% for key in old.keys() %}
+                <div style="margin-bottom:2px;">
+                    <span style="color:#888;">{{ key }}:</span>
+                    <span style="color:#c62828;text-decoration:line-through;">{{ old[key][:40] }}</span>
+                    →
+                    <span style="color:#2e7d32;">{{ new[key][:40] }}</span>
+                </div>
+                {% endfor %}
+            </td>
+        </tr>
+        {% else %}
+        <tr>
+            <td colspan="6" style="text-align:center;padding:30px;color:#999;">
+                Нет записей в логе.
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<!-- Пагинация -->
+{% if updates.pages > 1 %}
+<div style="margin-top:15px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+    {% if updates.has_prev %}
+    <a href="?page={{ updates.prev_num }}{% if course_filter %}&course_id={{ course_filter }}{% endif %}"
+       style="text-decoration:none;padding:4px 10px;background:#eee;border-radius:4px;">←</a>
+    {% endif %}
+    <span style="font-size:12px;color:#888;">
+        {{ updates.page }} / {{ updates.pages }} (всего: {{ updates.total }})
+    </span>
+    {% if updates.has_next %}
+    <a href="?page={{ updates.next_num }}{% if course_filter %}&course_id={{ course_filter }}{% endif %}"
+       style="text-decoration:none;padding:4px 10px;background:#eee;border-radius:4px;">→</a>
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}Редактирование курса{% endblock %}
+{% block content %}
+<h2 style="margin-bottom:15px;">Редактирование курса: {{ course.name }}</h2>
+
+<form method="post" style="max-width:500px;display:flex;flex-direction:column;gap:12px;">
+
+    <div>
+        <label style="display:block;margin-bottom:3px;">Название:</label>
+        <input type="text" name="name" value="{{ course.name|e }}"
+               style="width:100%;" required>
+    </div>
+
+    <div>
+        <label style="display:block;margin-bottom:3px;">Тип:</label>
+        <input type="text" name="course_type" value="{{ course.course_type|e }}"
+               style="width:100%;" required>
+    </div>
+
+    <div>
+    <label style="display:block;margin-bottom:3px;">Source URL (для проверки обновлений):</label>
+    <input type="text" name="source_url" value="{{ course.source_url|e }}"
+           placeholder="https://www.mathnet.ru/php/conference.phtml?confid=2740"
+           style="width:100%;">
+    </div>
+
+    <div style="background:#f8f9fa;padding:10px;border-radius:4px;">
+        <label style="display:block;margin-bottom:3px;font-weight:600;">Source path (общая часть):</label>
+        <input type="text" name="source_file_path" id="source_file_path"
+               value="{{ course.source_file_path|e }}"
+               placeholder="/mnt/data/courses/mathnet/"
+               style="width:100%;">
+        <span id="source_status" style="font-size:11px;"></span>
+    </div>
+
+    <div style="background:#f8f9fa;padding:10px;border-radius:4px;">
+        <label style="display:block;margin-bottom:3px;font-weight:600;">Output path (общая часть):</label>
+        <input type="text" name="output_file_path" id="output_file_path"
+               value="{{ course.output_file_path|e }}"
+               placeholder="/mnt/data/output/mathnet/"
+               style="width:100%;">
+        <span id="output_status" style="font-size:11px;"></span>
+    </div>
+
+    <!-- Кнопки -->
+    <div style="display:flex;gap:10px;align-items:center;">
+        <button type="button" id="btn-check-paths" class="btn" style="background:#555;">
+            🔍 Проверить пути
+        </button>
+    </div>
+    <div id="path-msg" style="font-size:12px;"></div>
+
+    <div style="display:flex;gap:10px;margin-top:10px;">
+        <button type="submit">Сохранить</button>
+        <a href="{{ url_for('main.courses') }}" class="btn"
+           style="text-decoration:none;padding:8px 16px;background:#888;color:#fff;border-radius:4px;">
+            Отмена
+        </a>
+    </div>
+</form>
+
+<script>
+document.getElementById("btn-check-paths").addEventListener("click", function() {
+    var srcPath = document.getElementById("source_file_path").value.trim();
+    var outPath = document.getElementById("output_file_path").value.trim();
+    var msgEl = document.getElementById("path-msg");
+    var srcStatus = document.getElementById("source_status");
+    var outStatus = document.getElementById("output_status");
+
+    msgEl.innerHTML = "⏳ Проверяю...";
+    msgEl.style.color = "#888";
+    srcStatus.innerHTML = "";
+    outStatus.innerHTML = "";
+
+    var checked = 0;
+    var total = 0;
+    if (srcPath) total++;
+    if (outPath) total++;
+
+    function checkDone() {
+        checked++;
+        if (checked >= total) {
+            msgEl.innerHTML = "✅ Проверка завершена";
+            msgEl.style.color = "#2e7d32";
+        }
+    }
+
+    if (srcPath) {
+        fetch("/api/validate-path", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path: srcPath })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.exists) {
+                srcStatus.innerHTML = data.is_dir ? "✅ папка существует" : "✅ существует (файл)";
+                srcStatus.style.color = "#2e7d32";
+            } else {
+                srcStatus.innerHTML = "❌ не найден: " + (data.normalized || srcPath);
+                srcStatus.style.color = "#c62828";
+            }
+            checkDone();
+        })
+        .catch(function(err) {
+            srcStatus.innerHTML = "⚠ ошибка запроса";
+            srcStatus.style.color = "#f57f17";
+            checkDone();
+        });
+    }
+
+    if (outPath) {
+        fetch("/api/validate-path", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path: outPath })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.exists) {
+                outStatus.innerHTML = data.is_dir ? "✅ папка существует" : "✅ существует (файл)";
+                outStatus.style.color = "#2e7d32";
+            } else {
+                outStatus.innerHTML = "❌ не найден: " + (data.normalized || outPath);
+                outStatus.style.color = "#c62828";
+            }
+            checkDone();
+        })
+        .catch(function(err) {
+            outStatus.innerHTML = "⚠ ошибка запроса";
+            outStatus.style.color = "#f57f17";
+            checkDone();
+        });
+    }
+
+    if (total === 0) {
+        msgEl.innerHTML = "⚠ Оба поля пусты — нечего проверять";
+        msgEl.style.color = "#f57f17";
+    }
+});
+</script>
+
+{% endblock %}
