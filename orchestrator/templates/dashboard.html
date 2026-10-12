@@ -81,7 +81,7 @@
             style="background:{{ attention_color(s) }};">
             <td style="background:{{ status_color(s.status) }};width:20px;min-width:20px;"></td>
             <td>{{ s.external_id }}</td>
-            <td>{{ s.room }}</td>
+            <td>{{ s.rooms | map(attribute='name') | join(', ') }}</td>
             <td style="max-width:300px;">
                 <a href="{{ url_for('main.edit_session', session_id=s.id) }}"
                    style="text-decoration:none;color:inherit;">

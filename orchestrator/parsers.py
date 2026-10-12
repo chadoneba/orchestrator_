@@ -94,3 +94,44 @@ class MathNetParser:
             return (data,"")
         else:
             return (data[:author_match.start()-1],data[author_match.start():])
+
+
+# ================================================================
+# Хелперы парсинга (используются при сохранении сессии)
+# ================================================================
+
+def parse_rooms(raw_room_string):
+    """
+    Извлекает комнаты из сырой строки (cols[-1]).
+    '305, online' → ['305', 'online']
+    '305'         → ['305']
+    'online'      → ['online']
+    ''            → []
+    """
+    if not raw_room_string:
+        return []
+
+    rooms = []
+    rooms.extend(re.findall(r'\b\d{3}\b', str(raw_room_string)))
+
+    if re.search(r'\bonline\b', str(raw_room_string), re.IGNORECASE):
+        rooms.append('online')
+
+    return rooms
+
+
+def parse_time_start(time_range_string):
+    """
+    Извлекает время начала из строки диапазона.
+    '10:00–11:30' → '10:00'
+    '10:00'       → '10:00'
+    '10:00 - 11:30' → '10:00'
+    ''            → None
+    """
+    if not time_range_string:
+        return None
+
+    match = re.match(r'(\d{1,2}:\d{2})', str(time_range_string).strip())
+    if match:
+        return match.group(1)
+    return None

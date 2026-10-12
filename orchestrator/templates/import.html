@@ -90,6 +90,8 @@
                 <input type="hidden" name="ext_id_{{ loop.index0 }}" value="{{ r.external_id }}">
                 <input type="hidden" name="date_{{ loop.index0 }}" value="{{ r.date }}">
                 <input type="hidden" name="status_{{ loop.index0 }}" value="{{ r.status }}">
+                <input type="hidden" name="time_range_{{ loop.index0 }}" value="{{ r.get('time_range', '') }}">
+                <input type="hidden" name="room_{{ loop.index0 }}" value="{{ r.get('room', '') }}">
 
                 <td style="vertical-align:middle;">{{ r.external_id }}</td>
                 <td>

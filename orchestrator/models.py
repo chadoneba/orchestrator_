@@ -1,8 +1,16 @@
 from flask_sqlalchemy import SQLAlchemy
 import json
+from sqlalchemy import MetaData
 
-db = SQLAlchemy()
+convention = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
 
+db = SQLAlchemy(metadata=MetaData(naming_convention=convention))
 
 class Course(db.Model):
     __tablename__ = "courses"
@@ -24,6 +32,53 @@ class Course(db.Model):
         return f"<Course {self.name} ({self.course_type})>"
 
 
+# ================================================================
+# Association table (Room ↔ Session, many-to-many)
+# ================================================================
+
+session_rooms = db.Table(
+    'session_rooms',
+    db.Column('session_id', db.Integer, db.ForeignKey('sessions.id'), primary_key=True),
+    db.Column('room_id',    db.Integer, db.ForeignKey('rooms.id'),    primary_key=True)
+)
+
+
+# ================================================================
+# Room
+# ================================================================
+
+class Room(db.Model):
+    __tablename__ = 'rooms'
+
+    id   = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), unique=True, nullable=False)
+
+    sessions = db.relationship(
+        'Session',
+        secondary=session_rooms,
+        back_populates='rooms'
+    )
+
+    def __repr__(self):
+        return f'<Room {self.name}>'
+
+
+# ================================================================
+# Performer
+# ================================================================
+
+class Performer(db.Model):
+    __tablename__ = 'performers'
+
+    id   = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), unique=True, nullable=False)
+
+    sessions = db.relationship('Session', back_populates='performer')
+
+    def __repr__(self):
+        return f'<Performer {self.name}>'
+
+
 class Session(db.Model):
     __tablename__ = "sessions"
 
@@ -33,10 +88,21 @@ class Session(db.Model):
     author = db.Column(db.String(255), nullable=False)
     date = db.Column(db.Date, nullable=False)
 
+    time_start = db.Column(db.Time)               # ← время начала (для сортировки/фильтрации)
+
     status = db.Column(db.String(20), nullable=False, default="planned")
 
     course_id = db.Column(db.Integer, db.ForeignKey("courses.id"), nullable=True)
     course = db.relationship("Course", back_populates="sessions")
+
+    performer_id = db.Column(db.Integer, db.ForeignKey('performers.id'), nullable=True)
+    performer    = db.relationship('Performer', back_populates='sessions')
+
+    rooms = db.relationship(
+        'Room',
+        secondary=session_rooms,
+        back_populates='sessions'
+    )
 
     # Путь к папке с исходниками (без имени файла)
     source_file_path = db.Column(db.String(1000), default="")

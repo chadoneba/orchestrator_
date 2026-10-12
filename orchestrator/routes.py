@@ -1,8 +1,8 @@
 import json as json_module
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
-from models import db, Session, Course, Clip, ConcatJob, Command, SessionUpdated
-from parsers import MathNetParser
-from datetime import datetime
+from models import db, Session, Course, Clip, ConcatJob, Command, SessionUpdated, Room, Performer
+from parsers import MathNetParser, parse_rooms, parse_time_start
+from datetime import datetime, date, time as dt_time
 import os
 import re
 from flask import jsonify
@@ -24,7 +24,6 @@ def dashboard():
 
     query = Session.query
 
-    # Фильтр по дате
     min_date = None
     if min_date_str:
         try:
@@ -34,21 +33,17 @@ def dashboard():
     if min_date:
         query = query.filter(Session.date >= min_date)
 
-    # Фильтр по курсу
     if course_filter:
         query = query.filter(Session.course_id == int(course_filter))
 
-    # Фильтр по типу курса
     if type_filter:
         query = query.join(Course).filter(Course.course_type == type_filter)
 
     sessions = query.order_by(Session.date.desc(), Session.external_id.desc()).all()
 
-    # Фильтр по цвету — Python (attention_color требует объект)
     if color_filter:
         sessions = [s for s in sessions if attention_color(s) == color_filter]
 
-    # Данные для фильтров
     courses = Course.query.order_by(Course.name).all()
     course_types = sorted(set(
         ct for ct, in db.session.query(Course.course_type).distinct()
@@ -76,9 +71,6 @@ def courses():
 
 
 # ------------------------------------------------------------------
-# Импорт: форма с URL → /api/parse → база
-# ------------------------------------------------------------------
-# ------------------------------------------------------------------
 # Импорт — двухэтапный
 # ------------------------------------------------------------------
 @bp.route("/import", methods=["GET", "POST"])
@@ -87,14 +79,12 @@ def import_sessions():
         action = request.form.get("action", "parse")  # "parse" или "save"
 
         # --- ЭТАП 2: сохранение в базу ---
-        # --- ЭТАП 2: сохранение в базу ---
         if action == "save":
             course_name = (request.form.get("course_name", "") or "").strip()
             course_type = (request.form.get("course_type", "") or "").strip()
             min_date_str = (request.form.get("min_date", "") or "").strip()
             source_url = (request.form.get("source_url", "") or "").strip()
             record_count = int(request.form.get("record_count", "0"))
-
 
             if not record_count:
                 flash("Нет данных для сохранения", "error")
@@ -108,6 +98,8 @@ def import_sessions():
                 author = (request.form.get(f"author_{i}", "") or "").strip()
                 date_str = (request.form.get(f"date_{i}", "") or "").strip()
                 status = (request.form.get(f"status_{i}", "") or "").strip()
+                raw_room = (request.form.get(f"room_{i}", "") or "").strip()
+                time_range = (request.form.get(f"time_range_{i}", "") or "").strip()
 
                 if not ext_id or not title:
                     continue
@@ -118,9 +110,10 @@ def import_sessions():
                     "author": author,
                     "date": date_str,
                     "status": status,
+                    "room": raw_room,
+                    "time_range": time_range,
                 })
 
-            # Дофильтрация по min_date
             if min_date_str:
                 try:
                     min_date = datetime.strptime(min_date_str, "%Y-%m-%d").date()
@@ -172,7 +165,29 @@ def import_sessions():
                     status=rec["status"],
                     course_id=course.id if course else None,
                 )
+
+                # --- Время начала ---
+                ts = parse_time_start(rec.get("time_range", ""))
+                if ts:
+                    try:
+                        h, m = map(int, ts.split(":"))
+                        session.time_start = dt_time(h, m)
+                    except (ValueError, TypeError):
+                        pass
+
                 db.session.add(session)
+                db.session.flush()  # нужен session.id
+
+                # --- Комнаты (парсим при сохранении) ---
+                room_names = parse_rooms(rec.get("room", ""))
+                for rname in room_names:
+                    room = Room.query.filter_by(name=rname).first()
+                    if not room:
+                        room = Room(name=rname)
+                        db.session.add(room)
+                        db.session.flush()
+                    session.rooms.append(room)
+
                 imported += 1
 
             db.session.commit()
@@ -327,10 +342,7 @@ def api_validate_path():
 
 @bp.route("/api/validate-session-path/<int:session_id>", methods=["GET"])
 def api_validate_session_path(session_id):
-    """Проверка полного пути для сессии (course + session).
-    Можно передать ?src_override=...&out_override=... чтобы проверить
-    несохранённые значения из формы.
-    """
+    """Проверка полного пути для сессии (course + session)."""
     session = Session.query.get_or_404(session_id)
     src_override = request.args.get("src_override", None)
     out_override = request.args.get("out_override", None)
@@ -376,6 +388,8 @@ def api_validate_session_path(session_id):
 def edit_session(session_id):
     session = Session.query.get_or_404(session_id)
     courses = Course.query.order_by(Course.name).all()
+    rooms_all = Room.query.order_by(Room.name).all()
+    performers_all = Performer.query.order_by(Performer.name).all()
 
     if request.method == "POST":
         action = request.form.get("action", "save")
@@ -397,7 +411,34 @@ def edit_session(session_id):
             else:
                 session.course_id = None
 
-            # --- Клипы: удалить старые, создать новые ---
+            # --- Комнаты ---
+            room_ids = request.form.getlist("room_ids")
+            session.rooms.clear()
+            for rid in room_ids:
+                if rid:
+                    room = Room.query.get(int(rid))
+                    if room:
+                        session.rooms.append(room)
+
+            # --- Исполнитель ---
+            performer_id = request.form.get("performer_id", "")
+            if performer_id:
+                session.performer_id = int(performer_id)
+            else:
+                session.performer_id = None
+
+            # --- Время начала ---
+            time_start_str = (request.form.get("time_start", "") or "").strip()
+            if time_start_str:
+                try:
+                    h, m = map(int, time_start_str.split(":"))
+                    session.time_start = dt_time(h, m)
+                except (ValueError, TypeError):
+                    session.time_start = None
+            else:
+                session.time_start = None
+
+            # --- Клипы ---
             Clip.query.filter_by(session_id=session.id).delete()
 
             clip_count = int(request.form.get("clip_count", "0"))
@@ -406,7 +447,6 @@ def edit_session(session_id):
                 st = (request.form.get(f"clip_start_time_{i}", "") or "").strip()
                 dur = (request.form.get(f"clip_duration_{i}", "") or "").strip()
 
-                # Пропускаем полностью пустые строки
                 if not fp and not st and not dur:
                     continue
 
@@ -440,7 +480,6 @@ def edit_session(session_id):
     output_dir_exists = os.path.isdir(output_dir) if output_dir else False
 
     clips = session.clips
-    # Если нет ни одного клипа — передаём один пустой для формы
     if not clips:
         clips = [Clip(file_path="", start_time="", duration="", sort_order=0)]
 
@@ -448,6 +487,8 @@ def edit_session(session_id):
         "edit_session.html",
         session=session,
         courses=courses,
+        rooms_all=rooms_all,
+        performers_all=performers_all,
         source_full=source_full,
         output_full=output_full,
         source_exists=source_exists,
@@ -487,13 +528,11 @@ def api_create_folders(session_id):
     if not session.course.source_file_path and not session.course.output_file_path:
         return jsonify({"error": "У курса не заданы пути (source_file_path и output_file_path)"}), 400
 
-    # Формат папки: MM.DD (например "10.03" для 3 октября)
     date_folder = session.date.strftime("%m.%d") if session.date else "unknown"
 
     created = []
     errors = []
 
-    # Source: курс/source/MM.DD/records
     if session.course.source_file_path:
         src_folder = normalize_path(
             os.path.join(session.course.source_file_path, date_folder, "records")
@@ -504,7 +543,6 @@ def api_create_folders(session_id):
         except OSError as e:
             errors.append({"path": src_folder, "error": str(e)})
 
-    # Output: курс/output/MM.DD/ready
     if session.course.output_file_path:
         out_folder = normalize_path(
             os.path.join(session.course.output_file_path, date_folder, "ready")
@@ -657,7 +695,7 @@ import re as _re
 # ------------------------------------------------------------------
 # Конфиг команд
 # ------------------------------------------------------------------
-LOGO_PATH = "/mnt/d/Maltsev/2026/logo_left_1080.png"  # ← замени на реальный путь
+LOGO_PATH = "/mnt/d/Maltsev/2026/logo_left_1080.png"
 
 
 def _extract_number(filename: str) -> int:
@@ -667,18 +705,14 @@ def _extract_number(filename: str) -> int:
 
 
 def build_transcode_commands(session: Session) -> str:
-    """Собирает команду (или две через &&) для transcode.py.
-    Возвращает пустую строку если нечего генерировать.
-    """
+    """Собирает команду (или две через &&) для transcode.py."""
     src_folder = _full_source_path(session)
     ext_id = session.external_id
 
-    # --- Случай 1: множественные клипы — пока пропускаем ---
     clips = [c for c in session.clips if c.file_path]
     if len(clips) > 1:
         return ""
 
-    # --- Случай 2: есть ConcatJob (MTS-файлы) ---
     concat_job = session.concat_jobs[0] if session.concat_jobs else None
     if concat_job and concat_job.status == "pending":
         files = concat_job.get_files()
@@ -690,7 +724,6 @@ def build_transcode_commands(session: Session) -> str:
 
         joined_ts = os.path.join(src_folder, f"{ext_id}_joined.ts")
 
-        # Команда 1: склейка MTS → TS
         cmd1 = (
             f"python transcode.py "
             f'-w "{src_folder}" '
@@ -698,7 +731,6 @@ def build_transcode_commands(session: Session) -> str:
             f'-o "{joined_ts}"'
         )
 
-        # Команда 2: нарезка TS → MP4
         out_mp4 = _full_output_path(session, filename=f"{ext_id}_joined.mp4")
         clip = clips[0] if clips else None
         ss = f"-s {clip.start_time}" if clip and clip.start_time else ""
@@ -713,7 +745,6 @@ def build_transcode_commands(session: Session) -> str:
 
         return f"{cmd1} && {cmd2}"
 
-    # --- Случай 3: одиночный клип ---
     if len(clips) == 1:
         clip = clips[0]
         file_full = os.path.join(src_folder, clip.file_path)
@@ -735,29 +766,22 @@ def build_transcode_commands(session: Session) -> str:
 
 @bp.route("/api/attention-colors", methods=["GET"])
 def api_attention_colors():
-    """Возвращает список уникальных цветов из attention_color().
-    Каждый цвет — объект {color, label, count}.
-    """
+    """Возвращает список уникальных цветов из attention_color()."""
     sessions = Session.query.all()
 
-    # Считаем цвета
-    color_map = {}  # color → count
+    color_map = {}
     for s in sessions:
         c = attention_color(s)
         color_map[c] = color_map.get(c, 0) + 1
 
-    # Сортируем по количеству (убывание)
     result = [
         {"color": c, "count": cnt}
         for c, cnt in sorted(color_map.items(), key=lambda x: -x[1])
     ]
     return jsonify(result)
 
-from datetime import date
 def attention_color(session: Session) -> str:
-    """Возвращает цвет строки в формате hex. По умолчанию белый.
-    Пропиши здесь свои правила.
-    """
+    """Возвращает цвет строки в формате hex."""
     if session.status == "planned" and session.date < date.today() and (date.today() - session.date).days > 2:
         return "#ef5350"
     return "#ffffff"
@@ -792,18 +816,14 @@ def _titles_equivalent(
     stored_title: str, stored_author: str,
     parsed_title: str, parsed_author: str,
 ) -> bool:
-    """True если парснутые данные совпадают с сохранёнными,
-    даже когда парсер склеил title+author в одно поле."""
     st = stored_title.strip()
     sa = stored_author.strip()
     pt = parsed_title.strip()
     pa = parsed_author.strip()
 
-    # Полное совпадение
     if st == pt and sa == pa:
         return True
 
-    # Парсер склеил title + author
     if sa and pt:
         variants = [
             f"{st} {sa}",
@@ -817,7 +837,6 @@ def _titles_equivalent(
         if st in pt and sa in pt:
             return True
 
-    # Title совпал, автор у парсера пуст (пользователь вписал вручную)
     if st == pt and not pa:
         return True
 
@@ -825,7 +844,7 @@ def _titles_equivalent(
 
 
 def _check_course_updates(course: Course) -> dict:
-    """Проверяет один курс. Возвращает {'log': [...], 'new': N, 'removed': N, 'changed': N}."""
+    """Проверяет один курс."""
     if not course.source_url:
         return {"error": "source_url не задан"}
 
@@ -850,7 +869,6 @@ def _check_course_updates(course: Course) -> dict:
     removed_count = 0
     changed_count = 0
 
-    # --- Новые ---
     for ext_id, rec in parsed_by_id.items():
         if ext_id not in existing_by_id:
             try:
@@ -870,7 +888,6 @@ def _check_course_updates(course: Course) -> dict:
             new_count += 1
             log.append(f"➕ Новая: {ext_id} — {rec.get('title', '?')[:60]}")
 
-    # --- Удалённые ---
     for ext_id, s in existing_by_id.items():
         if ext_id not in parsed_by_id:
             if s.status != "removed":
@@ -878,7 +895,6 @@ def _check_course_updates(course: Course) -> dict:
                 removed_count += 1
                 log.append(f"❌ Удалена: {ext_id} — {s.title[:60]}")
 
-    # --- Изменённые ---
     for ext_id, s in existing_by_id.items():
         rec = parsed_by_id.get(ext_id)
         if not rec:
@@ -891,12 +907,9 @@ def _check_course_updates(course: Course) -> dict:
         except (ValueError, KeyError):
             rec_date = s.date
 
-        # Сравниваем с учётом склейки title+author
         if _titles_equivalent(s.title, s.author, rec_title, rec_author):
-            # Title/author не изменились — проверяем только дату
             if s.date == rec_date:
                 continue
-            # Изменилась только дата
             old = {"date": s.date.strftime("%Y-%m-%d") if s.date else ""}
             new = {"date": rec_date.strftime("%Y-%m-%d") if rec_date else ""}
         else:
@@ -914,11 +927,10 @@ def _check_course_updates(course: Course) -> dict:
         if old == new:
             continue
 
-        # Сохраняем в лог
         upd = SessionUpdated(
             session_id=s.id,
-            old_data=json.dumps(old, ensure_ascii=False),
-            new_data=json.dumps(new, ensure_ascii=False),
+            old_data=json_module.dumps(old, ensure_ascii=False),
+            new_data=json_module.dumps(new, ensure_ascii=False),
         )
         db.session.add(upd)
         s.title = rec_title
@@ -975,7 +987,6 @@ def api_check_all_courses():
         total_removed += result["removed"]
         total_changed += result["changed"]
         total_parsed += result["parsed_count"]
-        # Лог с префиксом курса
         for line in result["log"]:
             all_log.append(f"[{course.name}] {line}")
 

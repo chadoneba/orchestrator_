@@ -49,6 +49,44 @@
                 {% endfor %}
             </select>
         </div>
+
+        <!-- ===== Время начала ===== -->
+        <div>
+            <label>Время начала:</label>
+            <input type="time" name="time_start"
+                   value="{{ session.time_start.strftime('%H:%M') if session.time_start else '' }}"
+                   style="width:100%;">
+        </div>
+
+        <!-- ===== Комнаты (множественный выбор) ===== -->
+        <div>
+            <label>Комнаты:</label>
+            <select name="room_ids" multiple
+                    style="width:100%; min-height:80px;">
+                {% for room in rooms_all %}
+                    <option value="{{ room.id }}"
+                        {% if room in session.rooms %}selected{% endif %}>
+                        {{ room.name }}
+                    </option>
+                {% endfor %}
+            </select>
+            <span style="font-size:11px;color:#999;">Ctrl+Click для множественного выбора</span>
+        </div>
+
+        <!-- ===== Исполнитель ===== -->
+        <div>
+            <label>Исполнитель:</label>
+            <select name="performer_id" style="width:100%;">
+                <option value="">—</option>
+                {% for p in performers_all %}
+                    <option value="{{ p.id }}"
+                        {% if session.performer_id == p.id %}selected{% endif %}>
+                        {{ p.name }}
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+
         <div>
             <label>Заметки:</label>
             <textarea name="notes" rows="3" style="width:100%;">{{ session.notes or '' }}</textarea>
@@ -349,7 +387,7 @@ function updateClipCounts() {
 
 rebindRemoveButtons();
 
-// --- Проверить пути (без изменений, но source теперь папка) ---
+// --- Проверить пути ---
 document.getElementById("btn-check-paths").addEventListener("click", function() {
     var srcInput = document.getElementById("source_file_path").value.trim();
     var outInput = document.getElementById("output_file_path").value.trim();
@@ -397,7 +435,7 @@ document.getElementById("btn-check-paths").addEventListener("click", function() 
         });
 });
 
-// --- Создать папки (без изменений) ---
+// --- Создать папки ---
 var btnCreate = document.getElementById("btn-create-folders");
 if (btnCreate) {
     btnCreate.addEventListener("click", function() {
@@ -489,7 +527,6 @@ function toggleAllMts(checkbox) {
     });
     updateMtsSelection();
 }
-// Глобально
 window.toggleAllMts = toggleAllMts;
 
 // --- Обновление выбранных ---
