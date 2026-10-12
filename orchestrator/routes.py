@@ -946,6 +946,37 @@ def _check_course_updates(course: Course) -> dict:
         if old.get("date") != new.get("date"):
             diff_parts.append("date")
         log.append(f"✏️ Изменена: {ext_id} — поля: {', '.join(diff_parts)}")
+        # --- Backfill: time_start + rooms для существующих ---
+    backfilled_time = 0
+    backfilled_rooms = 0
+
+    for ext_id, s in existing_by_id.items():
+        rec = parsed_by_id.get(ext_id)
+        if not rec:
+            continue
+
+        # time_start
+        if s.time_start is None:
+            ts = parse_time_start(rec.get("time_range", ""))
+            if ts:
+                h, m = ts.split(':')
+                s.time_start = dt_time(int(h), int(m))
+                backfilled_time += 1
+                log.append(f"🕐 backfill time: {ext_id} → {ts}")
+
+        # rooms
+        existing_rooms = {r.name for r in s.rooms}
+        parsed_names = set(parse_rooms(rec.get("room", "")))
+        new_rooms = parsed_names - existing_rooms
+        for rname in new_rooms:
+            room = Room.query.filter_by(name=rname).first()
+            if not room:
+                room = Room(name=rname)
+                db.session.add(room)
+                db.session.flush()
+            s.rooms.append(room)
+            backfilled_rooms += 1
+            log.append(f"🚪 backfill room: {ext_id} → {rname}")
 
     db.session.commit()
 
@@ -960,6 +991,8 @@ def _check_course_updates(course: Course) -> dict:
         "new": new_count,
         "removed": removed_count,
         "changed": changed_count,
+        "backfilled_time": backfilled_time,
+        "backfilled_rooms": backfilled_rooms,
         "log": log,
     }
 
@@ -976,6 +1009,8 @@ def api_check_all_courses():
     total_removed = 0
     total_changed = 0
     total_parsed = 0
+    total_btime = 0
+    total_brooms = 0
     errors = []
 
     for course in courses_with_url:
@@ -987,6 +1022,8 @@ def api_check_all_courses():
         total_removed += result["removed"]
         total_changed += result["changed"]
         total_parsed += result["parsed_count"]
+        total_btime += result.get("backfilled_time", 0)
+        total_brooms += result.get("backfilled_rooms", 0)
         for line in result["log"]:
             all_log.append(f"[{course.name}] {line}")
 
@@ -1000,5 +1037,75 @@ def api_check_all_courses():
         "new": total_new,
         "removed": total_removed,
         "changed": total_changed,
+        "backfilled_time": total_btime,
+        "backfilled_rooms": total_brooms,
         "log": all_log,
+    })
+
+@bp.route("/api/backfill-sessions", methods=["POST"])
+def api_backfill_sessions():
+    """Разовый backfill: time_start + rooms для существующих сессий."""
+    courses = Course.query.filter(Course.source_url != '').all()
+
+    if not courses:
+        return jsonify({"error": "Нет курсов с source_url"}), 400
+
+    total_time = 0
+    total_rooms = 0
+    errors = []
+    details = []
+
+    for course in courses:
+        try:
+            parser = MathNetParser(course.source_url)
+            parsed = parser.parse()
+        except Exception as e:
+            errors.append(f"{course.name}: {e}")
+            continue
+
+        parsed_by_id = {r["external_id"]: r for r in parsed}
+        sessions = Session.query.filter_by(course_id=course.id).all()
+
+        for session in sessions:
+            rec = parsed_by_id.get(session.external_id)
+            if not rec:
+                continue
+
+            changed = []
+
+            # --- time_start ---
+            if session.time_start is None:
+                ts = parse_time_start(rec.get("time_range", ""))
+                if ts:
+                    from datetime import time as dt_time
+                    h, m = ts.split(':')
+                    session.time_start = dt_time(int(h), int(m))
+                    changed.append(f"time_start={ts}")
+                    total_time += 1
+
+            # --- rooms ---
+            existing = {r.name for r in session.rooms}
+            parsed_names = set(parse_rooms(rec.get("room", "")))
+            new_rooms = parsed_names - existing
+            for rname in new_rooms:
+                room = Room.query.filter_by(name=rname).first()
+                if not room:
+                    room = Room(name=rname)
+                    db.session.add(room)
+                    db.session.flush()
+                session.rooms.append(room)
+                changed.append(f"+room={rname}")
+                total_rooms += 1
+
+            if changed:
+                details.append(f"{session.external_id}: {', '.join(changed)}")
+
+        db.session.commit()
+
+    return jsonify({
+        "ok": True,
+        "time_start_updated": total_time,
+        "rooms_added": total_rooms,
+        "errors": errors,
+        "details": details[:100],
     })
