@@ -48,9 +48,19 @@
         </select>
     </div>
 
+    <div>
+        <label style="display:block;font-size:11px;color:#888;margin-bottom:2px;">Статус:</label>
+        <select name="status" style="min-width:140px;">
+            <option value="">Все статусы</option>
+            {% for st in valid_statuses %}
+            <option value="{{ st }}" {% if status_filter == st %}selected{% endif %}>{{ st }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
     <button type="submit" style="background:#555;">🔍 Фильтровать</button>
 
-    {% if min_date or color_filter or course_filter or type_filter %}
+    {% if min_date or color_filter or course_filter or type_filter or status_filter %}
     <a href="{{ url_for('main.dashboard') }}"
        style="text-decoration:none;font-size:12px;color:#555;align-self:center;">✕ сбросить</a>
     {% endif %}
@@ -186,5 +196,16 @@ fetch("/api/attention-colors")
     .catch(function(err) {
         console.error("Не удалось загрузить цвета:", err);
     });
+
+document.querySelectorAll('tr[data-session-id]').forEach(function(row) {
+    row.style.cursor = 'pointer';
+    row.addEventListener('click', function(e) {
+        // Не перехватываем клики по ссылкам и кнопкам внутри строки
+        if (e.target.tagName === 'A' || e.target.tagName === 'BUTTON') return;
+        var sid = row.getAttribute('data-session-id');
+        window.open('/session/' + sid + '/edit');
+    });
+});
+
 </script>
 {% endblock %}

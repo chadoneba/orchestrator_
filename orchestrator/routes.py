@@ -21,6 +21,7 @@ def dashboard():
     color_filter = request.args.get("color", "").strip()
     course_filter = request.args.get("course_id", "").strip()
     type_filter = request.args.get("course_type", "").strip()
+    status_filter = request.args.get("status", "").strip()
 
     query = Session.query
 
@@ -39,6 +40,10 @@ def dashboard():
     if type_filter:
         query = query.join(Course).filter(Course.course_type == type_filter)
 
+    if status_filter:                                      
+        query = query.filter(Session.status == status_filter)
+        
+
     sessions = query.order_by(Session.date.desc(), Session.external_id.desc()).all()
 
     if color_filter:
@@ -50,6 +55,8 @@ def dashboard():
         if ct
     ))
 
+    valid_statuses = Session.VALID_STATUSES
+
     return render_template(
         "dashboard.html",
         sessions=sessions,
@@ -57,8 +64,10 @@ def dashboard():
         color_filter=color_filter,
         course_filter=course_filter,
         type_filter=type_filter,
+        status_filter=status_filter,                          
         courses=courses,
         course_types=course_types,
+        valid_statuses=valid_statuses,
     )
 
 # ------------------------------------------------------------------

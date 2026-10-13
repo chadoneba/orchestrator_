@@ -127,6 +127,7 @@ class Session(db.Model):
         "happened",
         "escaped",
         "received",
+        "prepared",
         "ready_for_edit",
         "ready_for_upload",
         "done",
