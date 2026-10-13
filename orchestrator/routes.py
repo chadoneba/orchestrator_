@@ -527,6 +527,24 @@ def _full_output_path(session: Session, filename: str = None) -> str:
         )
     return normalize_path(os.path.join(session.output_file_path or "", filename))
 
+def _list_files(folder: str, exts: tuple = None) -> list:
+    """Список имён файлов в папке ([] если папки нет или пуста)."""
+    if not folder or not os.path.isdir(folder):
+        return []
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:
+        return []
+    result = []
+    for f in names:
+        full = os.path.join(folder, f)
+        if not os.path.isfile(full):
+            continue
+        if exts and not f.lower().endswith(exts):
+            continue
+        result.append(f)
+    return result
+
 @bp.route("/api/create-folders/<int:session_id>", methods=["POST"])
 def api_create_folders(session_id):
     """Создаёт структуру папок records/ready для сессии."""
@@ -1192,3 +1210,73 @@ def _ready_folder(session: Session) -> str:
             os.path.join(session.course.output_file_path, date_folder, "ready")
         )
     return ""
+
+@bp.route("/api/update-statuses", methods=["POST"])
+def api_update_statuses():
+    """Обновляет статусы сессий по правилам, не трогая done."""
+    # --- те же фильтры, что на дашборде ---
+    min_date_str = request.args.get("min_date", "").strip()
+    course_filter = request.args.get("course_id", "").strip()
+    type_filter = request.args.get("course_type", "").strip()
+    status_filter = request.args.get("status", "").strip()
+    color_filter = request.args.get("color", "").strip()
+
+    query = Session.query.filter(Session.status != "done")
+
+    min_date = None
+    if min_date_str:
+        try:
+            min_date = datetime.strptime(min_date_str, "%Y-%m-%d").date()
+        except ValueError:
+            min_date = None
+    if min_date:
+        query = query.filter(Session.date >= min_date)
+
+    if course_filter:
+        query = query.filter(Session.course_id == int(course_filter))
+    if type_filter:
+        query = query.join(Course).filter(Course.course_type == type_filter)
+    if status_filter:
+        query = query.filter(Session.status == status_filter)
+
+    sessions = query.all()
+
+    if color_filter:
+        sessions = [s for s in sessions if attention_color(s) == color_filter]
+
+    updated = 0
+    details = []
+
+    for s in sessions:
+        new_status = None
+
+        # 1. В ready есть external_id.mp4 → ready_for_upload
+        ready_folder = _ready_folder(s)
+        if ready_folder and os.path.isfile(
+            os.path.join(ready_folder, f"{s.external_id}.mp4")
+        ):
+            new_status = "ready_for_upload"
+
+        # 2. Есть клипы, но mp4 ещё нет → ready_for_edit
+        if new_status is None:
+            if [c for c in s.clips if c.file_path]:
+                new_status = "ready_for_edit"
+
+        # 3. Нет клипов, но есть .ts/.mp4 в records → prepared
+        if new_status is None:
+            if _list_files(_records_folder(s), exts=(".ts", ".mp4")):
+                new_status = "prepared"
+
+        # 4. Нет ничего выше, но есть MTS → received
+        if new_status is None:
+            if _list_files(_full_source_path(s), exts=(".mts",)):
+                new_status = "received"
+
+        if new_status and new_status != s.status:
+            details.append(f"{s.external_id}: {s.status} → {new_status}")
+            s.status = new_status
+            updated += 1
+
+    db.session.commit()
+
+    return jsonify({"updated": updated, "details": details})

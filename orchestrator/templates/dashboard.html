@@ -58,7 +58,12 @@
         </select>
     </div>
 
+    
+
     <button type="submit" style="background:#555;">🔍 Фильтровать</button>
+
+    <button type="button" id="btn-update-statuses"
+            style="background:#2e7d32;">⟳ Обновить статусы</button>
 
     {% if min_date or color_filter or course_filter or type_filter or status_filter %}
     <a href="{{ url_for('main.dashboard') }}"
@@ -206,6 +211,33 @@ document.querySelectorAll('tr[data-session-id]').forEach(function(row) {
         window.open('/session/' + sid + '/edit');
     });
 });
+
+// --- Обновить статусы по правилам ---
+var btnUpdateStatuses = document.getElementById("btn-update-statuses");
+if (btnUpdateStatuses) {
+    btnUpdateStatuses.addEventListener("click", function() {
+        var params = new URLSearchParams(window.location.search).toString();
+        var orig = this.textContent;
+        this.disabled = true;
+        this.textContent = "⏳ Обновляю...";
+
+        fetch("/api/update-statuses?" + params, { method: "POST" })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var msg = "Обновлено статусов: " + data.updated;
+                if (data.details && data.details.length) {
+                    msg += "\n\n" + data.details.join("\n");
+                }
+                alert(msg);
+                window.location.reload();
+            })
+            .catch(function(err) {
+                alert("❌ Ошибка: " + err);
+                this.disabled = false;
+                this.textContent = orig;
+            });
+    });
+}
 
 </script>
 {% endblock %}
