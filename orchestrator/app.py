@@ -18,6 +18,12 @@ def create_app():
     migrate = Migrate(app, db)   # ← добавить
     app.register_blueprint(bp)
 
+    with app.app_context():
+        from models import Performer
+        if not Performer.query.filter_by(name="owner").first():
+            db.session.add(Performer(name="owner"))
+            db.session.commit()
+
     from routes import attention_color, status_color
 
     @app.context_processor

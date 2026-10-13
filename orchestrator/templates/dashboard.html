@@ -58,6 +58,17 @@
         </select>
     </div>
 
+    <div>
+        <label style="display:block;font-size:11px;color:#888;margin-bottom:2px;">Исполнитель:</label>
+        <select name="performer_id" style="min-width:150px;">
+            <option value="">Все исполнители</option>
+            <option value="none" {% if performer_filter == 'none' %}selected{% endif %}>— без исполнителя</option>
+            {% for p in performers_all %}
+            <option value="{{ p.id }}" {% if performer_filter == p.id|string %}selected{% endif %}>{{ p.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
     
 
     <button type="submit" style="background:#555;">🔍 Фильтровать</button>
@@ -65,7 +76,7 @@
     <button type="button" id="btn-update-statuses"
             style="background:#2e7d32;">⟳ Обновить статусы</button>
 
-    {% if min_date or color_filter or course_filter or type_filter or status_filter %}
+    {% if min_date or color_filter or course_filter or type_filter or status_filter or performer_filter %}
     <a href="{{ url_for('main.dashboard') }}"
        style="text-decoration:none;font-size:12px;color:#555;align-self:center;">✕ сбросить</a>
     {% endif %}

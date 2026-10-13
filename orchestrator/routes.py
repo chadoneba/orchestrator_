@@ -22,6 +22,7 @@ def dashboard():
     course_filter = request.args.get("course_id", "").strip()
     type_filter = request.args.get("course_type", "").strip()
     status_filter = request.args.get("status", "").strip()
+    performer_filter = request.args.get("performer_id", "").strip()
 
     query = Session.query
 
@@ -42,6 +43,11 @@ def dashboard():
 
     if status_filter:                                      
         query = query.filter(Session.status == status_filter)
+    
+    if performer_filter == "none":
+        query = query.filter(Session.performer_id.is_(None))
+    elif performer_filter:
+        query = query.filter(Session.performer_id == int(performer_filter))
         
 
     sessions = query.order_by(Session.date.desc(), Session.external_id.desc()).all()
@@ -57,6 +63,8 @@ def dashboard():
 
     valid_statuses = Session.VALID_STATUSES
 
+    performers_all = Performer.query.order_by(Performer.name).all()
+
     return render_template(
         "dashboard.html",
         sessions=sessions,
@@ -64,7 +72,9 @@ def dashboard():
         color_filter=color_filter,
         course_filter=course_filter,
         type_filter=type_filter,
-        status_filter=status_filter,                          
+        status_filter=status_filter,   
+        performer_filter=performer_filter,
+        performers_all=performers_all,                       
         courses=courses,
         course_types=course_types,
         valid_statuses=valid_statuses,
@@ -661,8 +671,27 @@ def api_concat_save(session_id):
 
 @bp.route("/commands")
 def commands_page():
-    commands = Command.query.order_by(Command.created_at.desc()).all()
-    return render_template("commands.html", commands=commands)
+    status_filter = request.args.get("status", "").strip()
+
+    query = Command.query.order_by(Command.created_at.desc())
+
+    if status_filter == "done":
+        query = query.filter(Command.status == "done")
+    elif status_filter == "all":
+        pass  # всё включая done
+    elif status_filter:
+        query = query.filter(Command.status == status_filter)
+    else:
+        # По умолчанию: всё кроме done
+        query = query.filter(Command.status != "done")
+
+    commands = query.all()
+
+    return render_template(
+        "commands.html",
+        commands=commands,
+        status_filter=status_filter,
+    )
 
 @bp.route("/log")
 def log_page():
@@ -694,7 +723,9 @@ def log_page():
 @bp.route("/commands/generate", methods=["POST"])
 def commands_generate():
     """Генерирует команды для всех сессий в ready_for_edit."""
-    sessions = Session.query.filter_by(status="ready_for_edit").all()
+    sessions = Session.query.filter(
+        Session.status.in_(["received", "ready_for_edit"])
+    ).all()
 
     generated = 0
     updated = 0
@@ -722,6 +753,33 @@ def commands_generate():
         "success",
     )
     return redirect(url_for("main.commands_page"))
+
+
+@bp.route("/api/command/<int:command_id>/status", methods=["POST"])
+def api_command_status(command_id):
+    """Изменить статус одной команды."""
+    cmd = Command.query.get_or_404(command_id)
+    data = request.get_json(silent=True) or {}
+    new_status = data.get("status", "").strip()
+
+    if new_status not in ("pending", "queued", "done", "failed"):
+        return jsonify({"error": f"Недопустимый статус: {new_status}"}), 400
+
+    cmd.status = new_status
+    db.session.commit()
+    return jsonify({"id": cmd.id, "status": cmd.status})
+
+
+@bp.route("/api/commands/queued", methods=["GET"])
+def api_commands_queued():
+    """Возвращает все команды со статусом queued."""
+    cmds = Command.query.filter_by(status="queued").order_by(Command.id).all()
+    pipeline = " && ".join(c.command for c in cmds)
+    return jsonify({
+        "count": len(cmds),
+        "pipeline": pipeline,
+        "commands": [{"id": c.id, "session_id": c.session_id, "command": c.command} for c in cmds],
+    })
 
 import re as _re
 

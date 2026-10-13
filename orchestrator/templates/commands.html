@@ -3,17 +3,43 @@
 {% block content %}
 <h2 style="margin-bottom:15px;">Команды</h2>
 
-<p style="margin-bottom:15px;font-size:13px;color:#666;">
-    Временная страница — команды для задач в статусе
-    <span class="status status-ready_for_edit">ready_for_edit</span>.
-    Скопируй нужную команду в CLI.
-</p>
+<!-- ====================================================================== -->
+<!-- ФИЛЬТР + КНОПКИ                                                         -->
+<!-- ====================================================================== -->
+<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:15px;
+            background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:12px;">
 
-<form method="post" action="{{ url_for('main.commands_generate') }}"
-      style="margin-bottom:15px;">
-    <button type="submit">🔄 Сгенерировать команды</button>
-</form>
+    <form method="get" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+        <div>
+            <label style="display:block;font-size:11px;color:#888;margin-bottom:2px;">Статус:</label>
+            <select name="status" onchange="this.form.submit()" style="min-width:150px;">
+                <option value="" {% if not status_filter %}selected{% endif %}>Все (без Done)</option>
+                {% for st in ["pending", "queued", "failed"] %}
+                <option value="{{ st }}" {% if status_filter == st %}selected{% endif %}>{{ st }}</option>
+                {% endfor %}
+                <option value="all" {% if status_filter == "all" %}selected{% endif %}>Все (включая Done)</option>
+                <option value="done" {% if status_filter == "done" %}selected{% endif %}>Done</option>
+            </select>
+        </div>
+        <button type="submit" style="background:#555;">🔍 Фильтровать</button>
+        {% if status_filter %}
+        <a href="{{ url_for('main.commands_page') }}"
+           style="text-decoration:none;font-size:12px;color:#555;align-self:center;">✕ сбросить</a>
+        {% endif %}
+    </form>
 
+    <div style="border-left:1px solid #e0e0e0;padding-left:10px;display:flex;gap:8px;">
+        <form method="post" action="{{ url_for('main.commands_generate') }}" style="margin:0;">
+            <button type="submit" style="background:#555;">🔄 Сгенерировать команды</button>
+        </form>
+        <button type="button" id="btn-show-pipeline"
+                style="background:#2e7d32;">▶ Показать конвейер (queued)</button>
+    </div>
+</div>
+
+<!-- ====================================================================== -->
+<!-- ТАБЛИЦА                                                                  -->
+<!-- ====================================================================== -->
 <table>
     <thead>
         <tr>
@@ -27,7 +53,7 @@
     </thead>
     <tbody>
         {% for cmd in commands %}
-        <tr>
+        <tr id="cmd-row-{{ cmd.id }}">
             <td>{{ cmd.id }}</td>
             <td>{{ cmd.session.external_id if cmd.session else '—' }}</td>
             <td style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
@@ -35,7 +61,12 @@
                 {{ cmd.session.title[:60] if cmd.session else '—' }}
             </td>
             <td>
-                <span class="status status-{{ cmd.status }}">{{ cmd.status }}</span>
+                <select class="status-dropdown" data-command-id="{{ cmd.id }}"
+                        style="font-size:12px;padding:2px 4px;border-radius:3px;">
+                    {% for st in ["pending", "queued", "done", "failed"] %}
+                    <option value="{{ st }}" {% if cmd.status == st %}selected{% endif %}>{{ st }}</option>
+                    {% endfor %}
+                </select>
             </td>
             <td style="max-width:400px;">
                 <code style="font-size:11px;word-break:break-all;display:block;">
@@ -53,25 +84,140 @@
         {% else %}
         <tr>
             <td colspan="6" style="text-align:center;padding:30px;color:#999;">
-                Нет команд. Нажми «Сгенерировать команды» (нужны сессии в ready_for_edit).
+                Нет команд.
             </td>
         </tr>
         {% endfor %}
     </tbody>
 </table>
 
+<!-- ====================================================================== -->
+<!-- МОДАЛЬНОЕ ОКНО: КОНВЕЙЕР QUEUED                                         -->
+<!-- ====================================================================== -->
+<div id="pipeline-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;
+            background:rgba(0,0,0,0.5);z-index:1000;justify-content:center;align-items:center;">
+    <div style="background:#fff;border-radius:8px;padding:20px;max-width:800px;width:90%;max-height:80vh;
+                display:flex;flex-direction:column;gap:15px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+            <h3 style="margin:0;">Конвейер (queued)</h3>
+            <button type="button" id="btn-close-modal"
+                    style="background:transparent;border:none;font-size:20px;cursor:pointer;padding:0 5px;">✕</button>
+        </div>
+        <div id="pipeline-count" style="font-size:13px;color:#888;"></div>
+        <textarea id="pipeline-text" readonly
+                  style="width:100%;height:200px;font-family:monospace;font-size:12px;
+                         border:1px solid #e0e0e0;border-radius:4px;padding:10px;
+                         resize:vertical;background:#fafafa;"></textarea>
+        <div style="display:flex;gap:10px;">
+            <button type="button" id="btn-copy-pipeline"
+                    style="background:#2e7d32;">📋 Копировать всё</button>
+        </div>
+        <div id="pipeline-list" style="max-height:200px;overflow-y:auto;font-size:12px;"></div>
+    </div>
+</div>
+
+<!-- ====================================================================== -->
+<!-- JS                                                                       -->
+<!-- ====================================================================== -->
 <script>
+// --- Копирование отдельной команды ---
 document.querySelectorAll(".copy-btn").forEach(function(btn) {
     btn.addEventListener("click", function() {
         var text = btn.getAttribute("data-command");
         navigator.clipboard.writeText(text).then(function() {
-            var original = btn.textContent;
+            var orig = btn.textContent;
             btn.textContent = "✅ Скопировано";
-            setTimeout(function() { btn.textContent = original; }, 1500);
+            setTimeout(function() { btn.textContent = orig; }, 1500);
         }).catch(function() {
             alert("Не удалось скопировать. Скопируй вручную.");
         });
     });
+});
+
+// --- Смена статуса через дропдаун ---
+document.querySelectorAll(".status-dropdown").forEach(function(sel) {
+    sel.addEventListener("change", function() {
+        var cmdId = sel.getAttribute("data-command-id");
+        var newStatus = sel.value;
+        var orig = sel.getAttribute("data-orig") || sel.value;
+
+        fetch("/api/command/" + cmdId + "/status", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: newStatus })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error) {
+                alert("Ошибка: " + data.error);
+                sel.value = orig;
+            } else {
+                var row = document.getElementById("cmd-row-" + cmdId);
+                if (row) {
+                    // Меняем цвет строки в зависимости от статуса
+                    var colors = { pending: "#fff", queued: "#e3f2fd", done: "#e8f5e9", failed: "#ffebee" };
+                    row.style.background = colors[data.status] || "#fff";
+                }
+            }
+        })
+        .catch(function(err) {
+            alert("❌ Ошибка: " + err);
+        });
+    });
+});
+
+// --- Модальное окно: конвейер queued ---
+var modal = document.getElementById("pipeline-modal");
+var btnShow = document.getElementById("btn-show-pipeline");
+var btnClose = document.getElementById("btn-close-modal");
+var countEl = document.getElementById("pipeline-count");
+var textarea = document.getElementById("pipeline-text");
+var listEl = document.getElementById("pipeline-list");
+var btnCopy = document.getElementById("btn-copy-pipeline");
+
+btnShow.addEventListener("click", function() {
+    modal.style.display = "flex";
+    textarea.value = "⏳ Загружаю...";
+    countEl.textContent = "";
+
+    fetch("/api/commands/queued")
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            countEl.textContent = "Команд в очереди: " + data.count;
+            textarea.value = data.pipeline || "(нет команд в статусе queued)";
+
+            var html = "";
+            data.commands.forEach(function(c) {
+                html += '<div style="padding:4px 0;border-bottom:1px solid #f0f0f0;">' +
+                    '<span style="color:#888;">#' + c.id + '</span> ' +
+                    (c.session_id || "—") + ': ' +
+                    c.command.substring(0, 120) +
+                    (c.command.length > 120 ? "…" : "") +
+                    '</div>';
+            });
+            listEl.innerHTML = html || '<div style="color:#999;">Нет команд</div>';
+        })
+        .catch(function(err) {
+            textarea.value = "❌ Ошибка: " + err;
+        });
+});
+
+btnClose.addEventListener("click", function() {
+    modal.style.display = "none";
+});
+
+btnCopy.addEventListener("click", function() {
+    navigator.clipboard.writeText(textarea.value).then(function() {
+        btnCopy.textContent = "✅ Скопировано!";
+        setTimeout(function() { btnCopy.textContent = "📋 Копировать всё"; }, 2000);
+    }).catch(function() {
+        alert("Не удалось скопировать. Скопируй вручную.");
+    });
+});
+
+// Закрытие по клику на тёмный фон
+modal.addEventListener("click", function(e) {
+    if (e.target === modal) modal.style.display = "none";
 });
 </script>
 {% endblock %}
