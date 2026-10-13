@@ -199,9 +199,8 @@
             + Добавить файл
         </button>
     </div>
-    <div class="block-body" id="clips-container"
-         style="display:flex;flex-direction:column;gap:12px;">
-
+    <div class="block-body" style="display:flex;flex-direction:column;gap:12px;">
+    <div id="clips-container" style="display:flex;flex-direction:column;gap:12px;">
         {% for clip in clips %}
         <div class="clip-row" data-index="{{ loop.index0 }}"
              style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;
@@ -243,7 +242,42 @@
             </button>
         </div>
         {% endfor %}
+    </div>
 
+    <div style="border-top:1px solid #e0e0e0;padding-top:12px;">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <button type="button" id="btn-list-edit-files" class="btn" style="background:#555;">
+                📁 Показать файлы (records)
+            </button>
+            <span id="edit-folder" style="font-size:11px;color:#888;"></span>
+        </div>
+        <div id="edit-file-list" style="display:none;max-height:250px;overflow-y:auto;
+                    border:1px solid #e0e0e0;border-radius:6px;padding:10px;background:#fafafa;margin-top:10px;">
+            <!-- Заполняется JS -->
+        </div>
+        <div id="edit-msg" style="font-size:12px;"></div>
+    </div>
+</div>
+</div>
+
+<!-- ====================================================================== -->
+<!-- БЛОК 4.5: Результат                                                     -->
+<!-- ====================================================================== -->
+<div class="block">
+    <div class="block-header">
+        <span>🎬 Результат</span>
+        <button type="button" id="btn-refresh-ready" class="btn"
+                style="font-size:11px;padding:4px 10px;background:#555;">
+            🔄 Обновить
+        </button>
+    </div>
+    <div class="block-body" style="display:flex;flex-direction:column;gap:12px;">
+        <span id="ready-folder" style="font-size:11px;color:#888;"></span>
+        <div id="ready-file-list" style="max-height:250px;overflow-y:auto;
+                    border:1px solid #e0e0e0;border-radius:6px;padding:10px;background:#fafafa;">
+            <!-- Заполняется JS -->
+        </div>
+        <div id="ready-msg" style="font-size:12px;"></div>
     </div>
 </div>
 
@@ -573,6 +607,113 @@ document.getElementById("btn-concat-save").addEventListener("click", function() 
         msgEl.style.color = "#c62828";
     });
 });
+
+// ======================================================================
+// Монтаж: список .ts/.mp4 файлов в папке records
+// ======================================================================
+function loadEditFiles() {
+    var msgEl = document.getElementById("edit-msg");
+    var listEl = document.getElementById("edit-file-list");
+    var folderSpan = document.getElementById("edit-folder");
+
+    msgEl.innerHTML = "⏳ Загружаю...";
+    msgEl.style.color = "#888";
+
+    fetch("/api/list-edit-files/" + sessionId)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            folderSpan.textContent = data.folder || "—";
+
+            if (data.error && data.files.length === 0) {
+                listEl.style.display = "block";
+                listEl.innerHTML = '<div style="color:#999;padding:10px;">' + data.error + '</div>';
+                msgEl.innerHTML = "⚠ " + data.error;
+                msgEl.style.color = "#f57f17";
+                return;
+            }
+            if (!data.files || data.files.length === 0) {
+                listEl.style.display = "block";
+                listEl.innerHTML = '<div style="color:#999;padding:10px;">Нет .ts/.mp4 файлов в папке records</div>';
+                msgEl.innerHTML = "⚠ Файлов не найдено";
+                msgEl.style.color = "#f57f17";
+                return;
+            }
+
+            msgEl.innerHTML = "✅ Найдено: " + data.count;
+            msgEl.style.color = "#2e7d32";
+            listEl.style.display = "block";
+
+            var html = "";
+            data.files.forEach(function(f) {
+                var sizeMB = (f.size / (1024 * 1024)).toFixed(1);
+                html += '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;border-bottom:1px solid #f0f0f0;">' +
+                    '<span style="flex:1;">' + f.name + '</span>' +
+                    '<span style="color:#888;font-size:11px;">' + sizeMB + ' MB</span>' +
+                    '</div>';
+            });
+            listEl.innerHTML = html;
+        })
+        .catch(function(err) {
+            msgEl.innerHTML = "❌ Ошибка: " + err;
+            msgEl.style.color = "#c62828";
+        });
+}
+
+document.getElementById("btn-list-edit-files").addEventListener("click", loadEditFiles);
+
+
+// ======================================================================
+// Результат: список файлов в папке ready
+// ======================================================================
+function loadReadyFiles() {
+    var msgEl = document.getElementById("ready-msg");
+    var listEl = document.getElementById("ready-file-list");
+    var folderSpan = document.getElementById("ready-folder");
+
+    msgEl.innerHTML = "⏳ Загружаю...";
+    msgEl.style.color = "#888";
+
+    fetch("/api/list-ready-files/" + sessionId)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            folderSpan.textContent = data.folder || "—";
+
+            if (data.error && data.files.length === 0) {
+                listEl.innerHTML = '<div style="color:#999;padding:10px;">' + data.error + '</div>';
+                msgEl.innerHTML = "⚠ " + data.error;
+                msgEl.style.color = "#f57f17";
+                return;
+            }
+            if (!data.files || data.files.length === 0) {
+                listEl.innerHTML = '<div style="color:#999;padding:10px;">Папка ready пуста</div>';
+                msgEl.innerHTML = "⚠ Файлов не найдено";
+                msgEl.style.color = "#f57f17";
+                return;
+            }
+
+            msgEl.innerHTML = "✅ Найдено: " + data.count;
+            msgEl.style.color = "#2e7d32";
+
+            var html = "";
+            data.files.forEach(function(f) {
+                var sizeMB = (f.size / (1024 * 1024)).toFixed(1);
+                html += '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;border-bottom:1px solid #f0f0f0;">' +
+                    '<span style="flex:1;">' + f.name + '</span>' +
+                    '<span style="color:#888;font-size:11px;">' + sizeMB + ' MB</span>' +
+                    '</div>';
+            });
+            listEl.innerHTML = html;
+        })
+        .catch(function(err) {
+            msgEl.innerHTML = "❌ Ошибка: " + err;
+            msgEl.style.color = "#c62828";
+        });
+}
+
+document.getElementById("btn-refresh-ready").addEventListener("click", loadReadyFiles);
+
+// Автозагрузка содержимого ready при открытии страницы
+loadReadyFiles();
 
 </script>
 

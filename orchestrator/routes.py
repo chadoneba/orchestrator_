@@ -1118,3 +1118,77 @@ def api_backfill_sessions():
         "errors": errors,
         "details": details[:100],
     })
+
+@bp.route("/api/list-edit-files/<int:session_id>", methods=["GET"])
+def api_list_edit_files(session_id):
+    """Список .ts и .mp4 файлов из папки records."""
+    session = Session.query.get_or_404(session_id)
+
+    folder = _records_folder(session)
+    if not folder:
+        return jsonify({"error": "У курса не задан source_file_path", "folder": "", "files": []}), 400
+    if not os.path.isdir(folder):
+        return jsonify({"error": f"Папка не существует: {folder}", "folder": folder, "files": []}), 404
+
+    try:
+        all_files = sorted(os.listdir(folder))
+        files = [
+            {
+                "name": f,
+                "size": os.path.getsize(os.path.join(folder, f)),
+                "mtime": os.path.getmtime(os.path.join(folder, f)),
+            }
+            for f in all_files
+            if f.lower().endswith((".ts", ".mp4"))
+        ]
+    except OSError as e:
+        return jsonify({"error": str(e), "folder": folder, "files": []}), 500
+
+    return jsonify({"folder": folder, "count": len(files), "files": files})
+
+
+@bp.route("/api/list-ready-files/<int:session_id>", methods=["GET"])
+def api_list_ready_files(session_id):
+    """Список файлов из папки ready."""
+    session = Session.query.get_or_404(session_id)
+
+    folder = _ready_folder(session)
+    if not folder:
+        return jsonify({"error": "У курса не задан output_file_path", "folder": "", "files": []}), 400
+    if not os.path.isdir(folder):
+        return jsonify({"error": f"Папка не существует: {folder}", "folder": folder, "files": []}), 404
+
+    try:
+        all_files = sorted(os.listdir(folder))
+        files = [
+            {
+                "name": f,
+                "size": os.path.getsize(os.path.join(folder, f)),
+                "mtime": os.path.getmtime(os.path.join(folder, f)),
+            }
+            for f in all_files
+            if os.path.isfile(os.path.join(folder, f))
+        ]
+    except OSError as e:
+        return jsonify({"error": str(e), "folder": folder, "files": []}), 500
+
+    return jsonify({"folder": folder, "count": len(files), "files": files})
+
+def _records_folder(session: Session) -> str:
+    """Полный путь к папке records (промежуточные .ts/.mp4)."""
+    if session.course and session.course.source_file_path:
+        date_folder = session.date.strftime("%m.%d") if session.date else "unknown"
+        return normalize_path(
+            os.path.join(session.course.source_file_path, date_folder, "records")
+        )
+    return ""
+
+
+def _ready_folder(session: Session) -> str:
+    """Полный путь к папке ready (готовые файлы)."""
+    if session.course and session.course.output_file_path:
+        date_folder = session.date.strftime("%m.%d") if session.date else "unknown"
+        return normalize_path(
+            os.path.join(session.course.output_file_path, date_folder, "ready")
+        )
+    return ""
