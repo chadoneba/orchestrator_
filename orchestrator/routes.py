@@ -595,7 +595,13 @@ def api_list_mts_files(session_id):
     """Возвращает список .mts файлов из папки course/session source."""
     session = Session.query.get_or_404(session_id)
 
-    folder = _full_source_path(session)
+    # Если session.source_file_path заполнен — используем как раньше
+    if session.source_file_path and session.source_file_path.strip():
+        folder = _full_source_path(session)
+    else:
+        # Поле пустое — fallback на сгенерированную папку records
+        folder = _records_folder(session)
+
     if not folder:
         return jsonify({"error": "Не задан путь к исходникам"}), 400
     if not os.path.isdir(folder):
