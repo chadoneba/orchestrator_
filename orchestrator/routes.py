@@ -1275,7 +1275,7 @@ def api_update_statuses():
 
         # 4. Нет ничего выше, но есть MTS → received
         if new_status is None:
-            if _list_files(_full_source_path(s), exts=(".mts",)):
+            if _list_files(_records_folder(s), exts=(".mts",)):
                 new_status = "received"
 
         if new_status and new_status != s.status:
