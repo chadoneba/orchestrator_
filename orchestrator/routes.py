@@ -105,6 +105,8 @@ def import_sessions():
             source_url = (request.form.get("source_url", "") or "").strip()
             record_count = int(request.form.get("record_count", "0"))
 
+            
+
             if not record_count:
                 flash("Нет данных для сохранения", "error")
                 return redirect(url_for("main.import_sessions"))
@@ -162,14 +164,25 @@ def import_sessions():
                 course = Course.query.filter_by(name=course_name).first()
 
             # Сохранение
+            # Сохранение
             imported = 0
             skipped = 0
+            assigned = 0          # ← новые: привязаны к курсу
 
             for rec in records:
                 ext_id = rec["external_id"]
-                if Session.query.filter_by(external_id=ext_id).first():
-                    skipped += 1
+
+                existing = Session.query.filter_by(external_id=ext_id).first()
+                if existing:
+                    # Сессия уже существует
+                    if existing.course_id is None and course is not None:
+                        # Без курса → привязываем к новому курсу
+                        existing.course_id = course.id
+                        assigned += 1
+                    else:
+                        skipped += 1
                     continue
+
                 try:
                     rec_date = datetime.strptime(rec["date"], "%Y-%m-%d").date()
                 except (ValueError, KeyError):
@@ -797,7 +810,7 @@ def _extract_number(filename: str) -> int:
 
 def build_transcode_commands(session: Session) -> str:
     """Собирает команду (или две через &&) для transcode.py."""
-    src_folder = _full_source_path(session)
+    src_folder = _records_folder(session)
     ext_id = session.external_id
 
     clips = [c for c in session.clips if c.file_path]
@@ -822,7 +835,7 @@ def build_transcode_commands(session: Session) -> str:
             f'-o "{joined_ts}"'
         )
 
-        out_mp4 = _full_output_path(session, filename=f"{ext_id}_joined.mp4")
+        out_mp4 = os.path.join(src_folder, f"{ext_id}_joined.mp4")
         clip = clips[0] if clips else None
         ss = f"-s {clip.start_time}" if clip and clip.start_time else ""
         dd = f"-d {clip.duration}" if clip and clip.duration else ""
@@ -839,7 +852,7 @@ def build_transcode_commands(session: Session) -> str:
     if len(clips) == 1:
         clip = clips[0]
         file_full = os.path.join(src_folder, clip.file_path)
-        out_full = _full_output_path(session)
+        out_full = _ready_folder(session)
 
         ss = f"-s {clip.start_time}" if clip.start_time else ""
         dd = f"-d {clip.duration}" if clip.duration else ""
