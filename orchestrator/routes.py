@@ -888,6 +888,8 @@ def attention_color(session: Session) -> str:
     """Возвращает цвет строки в формате hex."""
     if session.status == "planned" and session.date < date.today() and (date.today() - session.date).days > 2:
         return "#ef5350"
+    if session.status == "planned" and session.date < date.today() and (date.today() - session.date).days > 0:
+            return "#efef50"
     return "#ffffff"
 
 def status_color(status: str) -> str:
