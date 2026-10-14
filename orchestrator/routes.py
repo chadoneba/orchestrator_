@@ -657,8 +657,7 @@ def api_list_mts_files(session_id):
 
 @bp.route("/api/concat-save/<int:session_id>", methods=["POST"])
 def api_concat_save(session_id):
-    """Сохраняет список выбранных MTS-файлов в ConcatJob.
-       Уникальность: session_id + file_list."""
+    """Сохраняет ConcatJob. При совпадении session+files — перезаписывает."""
     session = Session.query.get_or_404(session_id)
     data = request.get_json(silent=True) or {}
 
@@ -666,29 +665,19 @@ def api_concat_save(session_id):
     if not files or not isinstance(files, list):
         return jsonify({"error": "Список файлов обязателен"}), 400
 
-    # --- Папка: если поле сессии пустое — records, иначе _full_source_path ---
     if session.source_file_path and session.source_file_path.strip():
         folder = _full_source_path(session)
     else:
         folder = _records_folder(session)
 
-    # --- Уникальность: проверяем, нет ли уже такого же набора ---
     import json as _json
     files_json = _json.dumps(files, ensure_ascii=False)
+
     existing = ConcatJob.query.filter_by(
         session_id=session.id, file_list=files_json
     ).first()
-    if existing:
-        return jsonify({
-            "id": existing.id,
-            "folder_path": existing.folder_path,
-            "output_name": existing.output_name,
-            "file_count": len(files),
-            "status": existing.status,
-            "duplicate": True,
-        })
 
-    # --- Генерируем имя выходного файла ---
+    # Генерируем имя
     ext_id = session.external_id
     nums = sorted(_extract_number(f) for f in files)
     if len(nums) == 1:
@@ -696,7 +685,19 @@ def api_concat_save(session_id):
     else:
         output_name = f"{ext_id}_joined_{nums[0]}_{nums[-1]}.ts"
 
-    # --- Сохраняем ---
+    if existing:
+        existing.status = "pending"
+        existing.folder_path = folder
+        existing.output_name = output_name
+        db.session.commit()
+        return jsonify({
+            "id": existing.id,
+            "output_name": output_name,
+            "file_count": len(files),
+            "status": existing.status,
+            "overwritten": True,
+        })
+
     job = ConcatJob(
         session_id=session.id,
         folder_path=folder,
@@ -709,7 +710,6 @@ def api_concat_save(session_id):
 
     return jsonify({
         "id": job.id,
-        "folder_path": job.folder_path,
         "output_name": output_name,
         "file_count": len(files),
         "status": job.status,
@@ -768,34 +768,32 @@ def log_page():
 
 @bp.route("/commands/generate", methods=["POST"])
 def commands_generate():
-    """Генерирует команды для всех сессий в ready_for_edit."""
+    """Удаляет старые команды и генерирует новые для received + ready_for_edit."""
     sessions = Session.query.filter(
         Session.status.in_(["received", "ready_for_edit"])
     ).all()
 
+    # Удаляем все старые команды для этих сессий
+    session_ids = [s.id for s in sessions]
+    if session_ids:
+        Command.query.filter(
+            Command.session_id.in_(session_ids)
+        ).delete(synchronize_session=False)
+
     generated = 0
-    updated = 0
     skipped = 0
 
     for s in sessions:
         cmd = build_transcode_commands(s)
-
         if not cmd:
             skipped += 1
             continue
-
-        existing = Command.query.filter_by(session_id=s.id).first()
-        if existing:
-            existing.command = cmd
-            existing.status = "pending"
-            updated += 1
-        else:
-            db.session.add(Command(session_id=s.id, command=cmd, status="pending"))
-            generated += 1
+        db.session.add(Command(session_id=s.id, command=cmd, status="pending"))
+        generated += 1
 
     db.session.commit()
     flash(
-        f"Сгенерировано: {generated}, обновлено: {updated}, пропущено: {skipped}",
+        f"Сгенерировано: {generated}, пропущено: {skipped}",
         "success",
     )
     return redirect(url_for("main.commands_page"))
@@ -853,6 +851,7 @@ def build_transcode_commands(session: Session) -> str:
         return ""
 
     parts = []
+    seen_files = set()  # ← защита от дубликатов
 
     # --- Склейки: обрабатываем ВСЕ pending ---
     concat_jobs = [j for j in session.concat_jobs if j.status == "pending"]
@@ -862,14 +861,25 @@ def build_transcode_commands(session: Session) -> str:
             parts.append(f"# ConcatJob {concat_job.id}: недостаточно файлов")
             continue
 
+        # Пропускаем повторяющиеся наборы файлов
+        key = tuple(sorted(files))
+        if key in seen_files:
+            continue
+        seen_files.add(key)
+
         nums = [_extract_number(f) for f in files]
         range_str = f"{min(nums)}-{max(nums)}"
 
-        # Имя из output_name (если есть), иначе fallback
+        # Имя: output_name, если заполнен; иначе генерируем из номеров
         if concat_job.output_name:
-            joined_ts = os.path.join(src_folder, concat_job.output_name)
+            joined_name = concat_job.output_name
         else:
-            joined_ts = os.path.join(src_folder, f"{ext_id}_joined.ts")
+            if len(nums) == 1:
+                joined_name = f"{ext_id}_joined_{nums[0]}.ts"
+            else:
+                joined_name = f"{ext_id}_joined_{min(nums)}_{max(nums)}.ts"
+
+        joined_ts = os.path.join(src_folder, joined_name)
 
         cmd1 = (
             f"python transcode.py "
@@ -900,7 +910,7 @@ def build_transcode_commands(session: Session) -> str:
         clip = clips[0]
         file_full = os.path.join(src_folder, clip.file_path)
         out_full_path = _ready_folder(session)
-        out_full = joined_ts = os.path.join(out_full_path, f"{ext_id}.mp4")
+        out_full = os.path.join(out_full_path, f"{ext_id}.mp4")
 
         ss = f"-s {clip.start_time}" if clip.start_time else ""
         dd = f"-d {clip.duration}" if clip.duration else ""
@@ -1407,3 +1417,28 @@ def api_update_statuses():
     db.session.commit()
 
     return jsonify({"updated": updated, "details": details})
+
+@bp.route("/api/concat-jobs/<int:session_id>", methods=["GET"])
+def api_concat_jobs(session_id):
+    """Возвращает все ConcatJob для сессии."""
+    Session.query.get_or_404(session_id)
+    jobs = ConcatJob.query.filter_by(session_id=session_id).order_by(ConcatJob.id).all()
+    return jsonify({
+        "jobs": [{
+            "id": j.id,
+            "files": j.get_files(),
+            "output_name": j.output_name,
+            "status": j.status,
+        } for j in jobs]
+    })
+
+@bp.route("/api/concat-delete", methods=["POST"])
+def api_concat_delete():
+    """Удаляет выбранные ConcatJob."""
+    data = request.get_json(silent=True) or {}
+    ids = [int(i) for i in data.get("ids", []) if str(i).isdigit()]
+    if not ids:
+        return jsonify({"error": "Нет id"}), 400
+    deleted = ConcatJob.query.filter(ConcatJob.id.in_(ids)).delete(synchronize_session=False)
+    db.session.commit()
+    return jsonify({"deleted": deleted})

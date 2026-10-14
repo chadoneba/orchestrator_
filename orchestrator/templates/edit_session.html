@@ -185,6 +185,22 @@
         </div>
 
         <div id="prep-msg" style="font-size:12px;"></div>
+        <!-- Существующие склейки -->
+        <div id="concat-jobs-section" style="display:none;
+                    border-top:1px solid #e0e0e0;padding-top:12px;">
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+                <span style="font-weight:600;font-size:13px;">📦 Склейки</span>
+                <button type="button" id="btn-concat-delete" class="btn"
+                        style="background:#c62828;font-size:11px;padding:4px 10px;display:none;">
+                    🗑 Удалить выбранные
+                </button>
+                <span id="concat-jobs-msg" style="font-size:11px;color:#888;"></span>
+            </div>
+            <div id="concat-jobs-list" style="max-height:200px;overflow-y:auto;
+                        border:1px solid #e0e0e0;border-radius:6px;padding:8px;background:#fafafa;">
+                <!-- Заполняется JS -->
+            </div>
+        </div>
     </div>
 </div>
 
@@ -575,7 +591,6 @@ function updateMtsSelection() {
 }
 window.updateMtsSelection = updateMtsSelection;
 
-// --- Склеить TS (сохранить в ConcatJob) ---
 document.getElementById("btn-concat-save").addEventListener("click", function() {
     var msgEl = document.getElementById("prep-msg");
     if (selectedMtsFiles.length < 2) {
@@ -597,15 +612,14 @@ document.getElementById("btn-concat-save").addEventListener("click", function() 
         if (data.error) {
             msgEl.innerHTML = "❌ " + data.error;
             msgEl.style.color = "#c62828";
+        } else if (data.overwritten) {
+            msgEl.innerHTML = "🔄 Перезаписано: " + data.output_name + " (ID: " + data.id + ")";
+            msgEl.style.color = "#f57f17";
         } else {
-            if (data.duplicate) {
-                msgEl.innerHTML = "⚠ Уже существует (ID: " + data.id + ", " + data.output_name + ")";
-                msgEl.style.color = "#f57f17";
-            } else {
-                msgEl.innerHTML = "✅ Склейка сохранена: " + data.output_name + " (ID: " + data.id + ", файлов: " + data.file_count + ")";
-                msgEl.style.color = "#2e7d32";
-            }
+            msgEl.innerHTML = "✅ Склейка сохранена: " + data.output_name + " (ID: " + data.id + ", файлов: " + data.file_count + ")";
+            msgEl.style.color = "#2e7d32";
         }
+        loadConcatJobs();
     })
     .catch(function(err) {
         msgEl.innerHTML = "❌ Ошибка: " + err;
@@ -717,8 +731,90 @@ function loadReadyFiles() {
 
 document.getElementById("btn-refresh-ready").addEventListener("click", loadReadyFiles);
 
-// Автозагрузка содержимого ready при открытии страницы
+// ======================================================================
+// Склейки: список + удаление
+// ======================================================================
+function loadConcatJobs() {
+    var section = document.getElementById("concat-jobs-section");
+    var listEl = document.getElementById("concat-jobs-list");
+    var msgEl = document.getElementById("concat-jobs-msg");
+    var delBtn = document.getElementById("btn-concat-delete");
+
+    fetch("/api/concat-jobs/" + sessionId)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.jobs || data.jobs.length === 0) {
+                section.style.display = "none";
+                return;
+            }
+            section.style.display = "block";
+            msgEl.textContent = "Всего: " + data.jobs.length;
+
+            var html = "";
+            data.jobs.forEach(function(j) {
+                var statusColor = {
+                    pending: "#888",
+                    merged: "#2e7d32",
+                    failed: "#c62828"
+                };
+                var color = statusColor[j.status] || "#888";
+                html += '<label style="display:flex;align-items:center;gap:8px;' +
+                        'padding:3px 0;cursor:pointer;font-size:13px;' +
+                        'border-bottom:1px solid #f0f0f0;">' +
+                    '<input type="checkbox" class="concat-check" value="' + j.id + '" ' +
+                    'onchange="updateConcatDeleteBtn()">' +
+                    '<span style="flex:1;">' + (j.output_name || "(без имени)") + '</span>' +
+                    '<span style="font-size:10px;">' + j.files.length + ' файлов</span>' +
+                    '<span style="color:' + color + ';font-size:10px;">' + j.status + '</span>' +
+                    '</label>';
+            });
+            listEl.innerHTML = html;
+
+            delBtn.style.display = "inline-block";
+            updateConcatDeleteBtn();
+        })
+        .catch(function(err) {
+            console.error(err);
+        });
+}
+
+function updateConcatDeleteBtn() {
+    var checked = document.querySelectorAll(".concat-check:checked").length;
+    var delBtn = document.getElementById("btn-concat-delete");
+    delBtn.style.display = checked > 0 ? "inline-block" : "none";
+    if (checked > 0) delBtn.textContent = "🗑 Удалить (" + checked + ")";
+}
+window.updateConcatDeleteBtn = updateConcatDeleteBtn;
+
+document.getElementById("btn-concat-delete").addEventListener("click", function() {
+    var boxes = document.querySelectorAll(".concat-check:checked");
+    if (boxes.length === 0) return;
+    if (!confirm("Удалить " + boxes.length + " склеек? Это необратимо.")) return;
+
+    var ids = [];
+    boxes.forEach(function(cb) { ids.push(cb.value); });
+
+    var orig = this.textContent;
+    this.disabled = true;
+    this.textContent = "⏳ Удаляю...";
+
+    fetch("/api/concat-delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: ids })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function() {
+        loadConcatJobs();
+    })
+    .catch(function(err) {
+        alert("❌ Ошибка: " + err);
+    });
+});
+
+// Автозагрузка при открытии страницы
 loadReadyFiles();
+loadConcatJobs();
 
 </script>
 
