@@ -166,6 +166,7 @@ class ConcatJob(db.Model):
     folder_path = db.Column(db.String(1000), default="")   # course + session
     file_list = db.Column(db.Text, default="[]")             # JSON-массив имён файлов
     status = db.Column(db.String(20), default="pending")   # pending / merged / failed
+    output_name = db.Column(db.String(200), default="")   # external_id_joined_725_727.ts
 
     created_at = db.Column(db.DateTime, server_default=db.func.now())
 

@@ -657,7 +657,8 @@ def api_list_mts_files(session_id):
 
 @bp.route("/api/concat-save/<int:session_id>", methods=["POST"])
 def api_concat_save(session_id):
-    """Сохраняет список выбранных MTS-файлов в ConcatJob."""
+    """Сохраняет список выбранных MTS-файлов в ConcatJob.
+       Уникальность: session_id + file_list."""
     session = Session.query.get_or_404(session_id)
     data = request.get_json(silent=True) or {}
 
@@ -665,10 +666,41 @@ def api_concat_save(session_id):
     if not files or not isinstance(files, list):
         return jsonify({"error": "Список файлов обязателен"}), 400
 
-    folder = _full_source_path(session)
+    # --- Папка: если поле сессии пустое — records, иначе _full_source_path ---
+    if session.source_file_path and session.source_file_path.strip():
+        folder = _full_source_path(session)
+    else:
+        folder = _records_folder(session)
+
+    # --- Уникальность: проверяем, нет ли уже такого же набора ---
+    import json as _json
+    files_json = _json.dumps(files, ensure_ascii=False)
+    existing = ConcatJob.query.filter_by(
+        session_id=session.id, file_list=files_json
+    ).first()
+    if existing:
+        return jsonify({
+            "id": existing.id,
+            "folder_path": existing.folder_path,
+            "output_name": existing.output_name,
+            "file_count": len(files),
+            "status": existing.status,
+            "duplicate": True,
+        })
+
+    # --- Генерируем имя выходного файла ---
+    ext_id = session.external_id
+    nums = sorted(_extract_number(f) for f in files)
+    if len(nums) == 1:
+        output_name = f"{ext_id}_joined_{nums[0]}.ts"
+    else:
+        output_name = f"{ext_id}_joined_{nums[0]}_{nums[-1]}.ts"
+
+    # --- Сохраняем ---
     job = ConcatJob(
         session_id=session.id,
         folder_path=folder,
+        output_name=output_name,
         status="pending",
     )
     job.set_files(files)
@@ -678,6 +710,7 @@ def api_concat_save(session_id):
     return jsonify({
         "id": job.id,
         "folder_path": job.folder_path,
+        "output_name": output_name,
         "file_count": len(files),
         "status": job.status,
     })
@@ -809,7 +842,9 @@ def _extract_number(filename: str) -> int:
 
 
 def build_transcode_commands(session: Session) -> str:
-    """Собирает команду (или две через &&) для transcode.py."""
+    """Собирает команды для transcode.py.
+       Обрабатывает все pending ConcatJob, а не только первый.
+       Несколько команд разделяются через &&."""
     src_folder = _records_folder(session)
     ext_id = session.external_id
 
@@ -817,16 +852,24 @@ def build_transcode_commands(session: Session) -> str:
     if len(clips) > 1:
         return ""
 
-    concat_job = session.concat_jobs[0] if session.concat_jobs else None
-    if concat_job and concat_job.status == "pending":
+    parts = []
+
+    # --- Склейки: обрабатываем ВСЕ pending ---
+    concat_jobs = [j for j in session.concat_jobs if j.status == "pending"]
+    for concat_job in concat_jobs:
         files = concat_job.get_files()
         if len(files) < 2:
-            return f"# ConcatJob {concat_job.id}: недостаточно файлов"
+            parts.append(f"# ConcatJob {concat_job.id}: недостаточно файлов")
+            continue
 
         nums = [_extract_number(f) for f in files]
         range_str = f"{min(nums)}-{max(nums)}"
 
-        joined_ts = os.path.join(src_folder, f"{ext_id}_joined.ts")
+        # Имя из output_name (если есть), иначе fallback
+        if concat_job.output_name:
+            joined_ts = os.path.join(src_folder, concat_job.output_name)
+        else:
+            joined_ts = os.path.join(src_folder, f"{ext_id}_joined.ts")
 
         cmd1 = (
             f"python transcode.py "
@@ -835,38 +878,43 @@ def build_transcode_commands(session: Session) -> str:
             f'-o "{joined_ts}"'
         )
 
-        out_mp4 = os.path.join(src_folder, f"{ext_id}_joined.mp4")
+        # Выходной mp4: рядом с joined_ts (в records), имя из output_name
+        base_name = os.path.splitext(os.path.basename(joined_ts))[0]
+        out_mp4 = os.path.join(src_folder, f"{base_name}.mp4")
+
         clip = clips[0] if clips else None
         ss = f"-s {clip.start_time}" if clip and clip.start_time else ""
         dd = f"-d {clip.duration}" if clip and clip.duration else ""
         cmd2 = (
             f"python transcode.py "
             f'-v "{joined_ts}" '
-            f"{ss} "
-            f"{dd} "
+            f"{ss}"
+            f"{dd}"
             f'-o "{out_mp4}"'
         )
 
-        return f"{cmd1} && {cmd2}"
+        parts.append(f"{cmd1} && {cmd2}")
 
-    if len(clips) == 1:
+    # --- Одиночный клип (только если нет склеек) ---
+    if not concat_jobs and len(clips) == 1:
         clip = clips[0]
         file_full = os.path.join(src_folder, clip.file_path)
-        out_full = _ready_folder(session)
+        out_full_path = _ready_folder(session)
+        out_full = joined_ts = os.path.join(out_full_path, f"{ext_id}.mp4")
 
         ss = f"-s {clip.start_time}" if clip.start_time else ""
         dd = f"-d {clip.duration}" if clip.duration else ""
 
-        return (
+        parts.append(
             f"python transcode.py "
             f'-v "{file_full}" '
-            f"{ss} "
-            f"{dd} "
+            f"{ss}"
+            f"{dd}"
             f'-lg "{LOGO_PATH}" '
             f'-o "{out_full}"'
         )
 
-    return ""
+    return " && ".join(parts) if parts else ""
 
 @bp.route("/api/attention-colors", methods=["GET"])
 def api_attention_colors():

@@ -598,8 +598,13 @@ document.getElementById("btn-concat-save").addEventListener("click", function() 
             msgEl.innerHTML = "❌ " + data.error;
             msgEl.style.color = "#c62828";
         } else {
-            msgEl.innerHTML = "✅ Склейка сохранена (ID: " + data.id + ", файлов: " + data.file_count + ")";
-            msgEl.style.color = "#2e7d32";
+            if (data.duplicate) {
+                msgEl.innerHTML = "⚠ Уже существует (ID: " + data.id + ", " + data.output_name + ")";
+                msgEl.style.color = "#f57f17";
+            } else {
+                msgEl.innerHTML = "✅ Склейка сохранена: " + data.output_name + " (ID: " + data.id + ", файлов: " + data.file_count + ")";
+                msgEl.style.color = "#2e7d32";
+            }
         }
     })
     .catch(function(err) {
