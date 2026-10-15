@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% block title %}Внешняя очередь{% endblock %}
+{% block content %}
+<h2 style="margin-bottom:15px;">Внешняя очередь (Run Service)</h2>
+
+<!-- ВОРКЕР -->
+<div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:12px;margin-bottom:15px;">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+        <span style="font-weight:600;">⚙️ Воркер:</span>
+        <span id="worker-status" style="color:#888;">⏳ загружаю…</span>
+        <button type="button" id="btn-pause" style="background:#f57f17;">⏸ Пауза</button>
+        <button type="button" id="btn-resume" style="background:#2e7d32;">▶ Продолжить</button>
+        <button type="button" id="btn-refresh" style="background:#555;">🔄 Обновить</button>
+    </div>
+</div>
+
+<!-- ОШИБКА -->
+<div id="error-box" style="display:none;background:#ffebee;color:#c62828;
+            border:1px solid #ef9a9a;border-radius:8px;padding:10px;margin-bottom:15px;">
+</div>
+
+<!-- ОЧЕРЕДЬ -->
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Тип</th>
+            <th>Статус</th>
+            <th>Позиция</th>
+            <th>Прогресс</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody id="queue-body">
+        <tr><td colspan="6" style="text-align:center;color:#999;padding:20px;">⏳ Загружаю очередь…</td></tr>
+    </tbody>
+</table>
+
+<script>
+var QUEUE_URL = "/run/api/queue";
+var WORKER_URL = "/run/api/worker/status";
+
+var progressCache = {};
+
+// --- Раскраска статусов ---
+var statusColor = {
+    pending: "#ffb74d",
+    running: "#42a5f5",
+    done: "#66bb6a",
+    completed: "#66bb6a",
+    failed: "#ef5350",
+    cancelled: "#9e9e9e"
+};
+
+function showError(msg) {
+    var box = document.getElementById("error-box");
+    if (!msg) { box.style.display = "none"; return; }
+    box.style.display = "block";
+    box.textContent = "❌ " + msg;
+}
+
+function renderWorker(data) {
+    var el = document.getElementById("worker-status");
+    if (data.error) {
+        el.textContent = "недоступен: " + data.error;
+        el.style.color = "#c62828";
+        return;
+    }
+    var state = data.paused ? "⏸ приостановлен" : "▶ работает";
+    var cur = data.current_task_id != null ? ", задача #" + data.current_task_id : "";
+    el.textContent = state + cur;
+    el.style.color = data.paused ? "#f57f17" : "#2e7d32";
+}
+
+function renderQueue(items) {
+    var body = document.getElementById("queue-body");
+    if (!Array.isArray(items)) {
+        showError(items && items.error ? items.error : "Некорректный ответ /queue");
+        return;
+    }
+    showError(null);
+
+    if (items.length === 0) {
+        body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999;padding:20px;">Очередь пуста</td></tr>';
+        return;
+    }
+
+    var html = "";
+    items.forEach(function(item) {
+        var prog = progressCache[item.id];
+        var progText = "";
+        if (prog && prog.percent != null) {
+            progText = Math.round(prog.percent) + "%";
+        } else if (prog && prog.status) {
+            progText = prog.status;
+        } else {
+            progText = "…";
+        }
+
+        var color = statusColor[item.status] || "#888";
+        html += '<tr id="task-row-' + item.id + '">' +
+            '<td>' + item.id + '</td>' +
+            '<td>' + item.task_type + '</td>' +
+            '<td style="color:' + color + ';">' + item.status + '</td>' +
+            '<td>' + item.position + '</td>' +
+            '<td id="task-prog-' + item.id + '">' + progText + '</td>' +
+            '<td><button type="button" class="cancel-btn" data-id="' + item.id + '" ' +
+                'style="font-size:11px;padding:4px 8px;background:#c62828;color:#fff;' +
+                'border:none;border-radius:3px;cursor:pointer;">✕ Отменить</button></td>' +
+            '</tr>';
+    });
+    body.innerHTML = html;
+
+    // Привязка кнопок отмены
+    document.querySelectorAll(".cancel-btn").forEach(function(btn) {
+        btn.addEventListener("click", function() {
+            var id = btn.getAttribute("data-id");
+            if (!confirm("Отменить задачу #" + id + "?")) return;
+            btn.disabled = true;
+            btn.textContent = "⏳";
+            fetch("/run/api/task/" + id + "/cancel", { method: "POST" })
+                .then(function(r) { return r.json(); })
+                .then(function() { poll(); })
+                .catch(function(err) { alert("❌ " + err); poll(); });
+        });
+    });
+}
+
+function loadProgress(items) {
+    items.forEach(function(item) {
+        fetch("/run/api/task/" + item.id + "/progress")
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data.error) {
+                    progressCache[item.id] = data;
+                    var cell = document.getElementById("task-prog-" + item.id);
+                    if (cell && data.percent != null) {
+                        cell.textContent = Math.round(data.percent) + "%";
+                    } else if (cell && data.status) {
+                        cell.textContent = data.status;
+                    }
+                }
+            })
+            .catch(function() {});
+    });
+}
+
+function poll() {
+    fetch(WORKER_URL)
+        .then(function(r) { return r.json(); })
+        .then(renderWorker)
+        .catch(function() { renderWorker({ error: "нет соединения" }); });
+
+    fetch(QUEUE_URL)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error) { showError(data.error); return; }
+            renderQueue(data);
+            loadProgress(data);
+        })
+        .catch(function(err) { showError(err); });
+}
+
+// Кнопки воркера
+document.getElementById("btn-pause").addEventListener("click", function() {
+    fetch("/run/api/worker/pause", { method: "POST" })
+        .then(function(r) { return r.json(); })
+        .then(function() { poll(); })
+        .catch(function(err) { showError(err); });
+});
+document.getElementById("btn-resume").addEventListener("click", function() {
+    fetch("/run/api/worker/resume", { method: "POST" })
+        .then(function(r) { return r.json(); })
+        .then(function() { poll(); })
+        .catch(function(err) { showError(err); });
+});
+document.getElementById("btn-refresh").addEventListener("click", poll);
+
+// Первый запуск + опрос каждые 2 секунды
+poll();
+setInterval(poll, 2000);
+</script>
+{% endblock %}
