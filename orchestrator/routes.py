@@ -830,7 +830,7 @@ import re as _re
 # ------------------------------------------------------------------
 # Конфиг команд
 # ------------------------------------------------------------------
-LOGO_PATH = "/mnt/d/Maltsev/2026/logo_left_1080.png"
+LOGO_PATH = "/Users/mikhailmaltsev/develop/test_path/logo_left_1080.png"
 
 
 def _extract_number(filename: str) -> int:

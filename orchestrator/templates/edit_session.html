@@ -304,7 +304,11 @@
     <div class="block-header">⚡ Действия</div>
     <div class="block-body" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
         <button type="submit">💾 Сохранить</button>
-        <a href="{{ url_for('main.dashboard') }}" class="btn" style="text-decoration:none;background:#888;">
+        <button type="button" id="btn-send-run" class="btn"
+        style="background:#1565c0;">
+    📤 В внешнюю очередь
+    </button>
+    <a href="{{ url_for('main.dashboard') }}" class="btn" style="text-decoration:none;background:#888;">
             ← Дашборд
         </a>
     </div>
@@ -811,6 +815,33 @@ document.getElementById("btn-concat-delete").addEventListener("click", function(
         alert("❌ Ошибка: " + err);
     });
 });
+
+// --- Отправка транскода с лого во внешнюю очередь ---
+var btnSendRun = document.getElementById("btn-send-run");
+if (btnSendRun) {
+    btnSendRun.addEventListener("click", function() {
+        var orig = this.textContent;
+        this.disabled = true;
+        this.textContent = "⏳ Отправляю…";
+
+        fetch("/run/api/send/" + sessionId, { method: "POST" })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                this && (btnSendRun.disabled = false, btnSendRun.textContent = orig);
+                if (data.error) {
+                    alert("❌ " + data.error);
+                } else {
+                    alert("✅ Отправлено в очередь: ID=" + data.id + ", статус=" + data.status);
+                    window.open("/run/", "_blank");
+                }
+            })
+            .catch(function(err) {
+                btnSendRun.disabled = false;
+                btnSendRun.textContent = orig;
+                alert("❌ " + err);
+            });
+    });
+}
 
 // Автозагрузка при открытии страницы
 loadReadyFiles();

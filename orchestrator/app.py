@@ -2,6 +2,7 @@ from flask import Flask
 from flask_migrate import Migrate
 from models import db
 from routes import bp
+from runservice import run_bp
 import os
 
 def create_app():
@@ -17,6 +18,7 @@ def create_app():
     db.init_app(app)
     migrate = Migrate(app, db)   # ← добавить
     app.register_blueprint(bp)
+    app.register_blueprint(run_bp) 
 
     with app.app_context():
         from models import Performer
