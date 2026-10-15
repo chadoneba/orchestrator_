@@ -25,6 +25,7 @@
         <tr>
             <th>ID</th>
             <th>Тип</th>
+            <th>Короткое имя</th>
             <th>Статус</th>
             <th>Позиция</th>
             <th>Прогресс</th>
@@ -35,6 +36,36 @@
         <tr><td colspan="6" style="text-align:center;color:#999;padding:20px;">⏳ Загружаю очередь…</td></tr>
     </tbody>
 </table>
+
+<!-- ИСТОРИЯ -->
+<div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:12px;margin-top:15px;">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+        <span style="font-weight:600;">🗂 История</span>
+        <span id="history-msg" style="font-size:11px;color:#888;"></span>
+        <span style="flex:1;"></span>
+        <input type="datetime-local" id="history-before" style="font-size:12px;">
+        <button type="button" id="btn-history-clear"
+                style="background:#c62828;font-size:11px;padding:4px 10px;">
+            🗑 Очистить до даты
+        </button>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>UID</th>
+                <th>Тип</th>
+                <th>Статус</th>
+                <th>Ошибка</th>
+                <th>Начало</th>
+                <th>Конец</th>
+                <th>Длит. (с)</th>
+            </tr>
+        </thead>
+        <tbody id="history-body">
+            <tr><td colspan="7" style="text-align:center;color:#999;padding:20px;">⏳ Загружаю историю…</td></tr>
+        </tbody>
+    </table>
+</div>
 
 <script>
 var QUEUE_URL = "/run/api/queue";
@@ -67,7 +98,7 @@ function renderWorker(data) {
         return;
     }
     var state = data.paused ? "⏸ приостановлен" : "▶ работает";
-    var cur = data.current_task_id != null ? ", задача #" + data.current_task_id : "";
+    var cur = data.current_task_uid != null ? ", задача #" + data.current_task_uid : "";
     el.textContent = state + cur;
     el.style.color = data.paused ? "#f57f17" : "#2e7d32";
 }
@@ -87,9 +118,12 @@ function renderQueue(items) {
 
     var html = "";
     items.forEach(function(item) {
-        var prog = progressCache[item.id];
+        var uid = item.task_uid != null ? item.task_uid : "—";
+        var prog = progressCache[uid];
         var progText = "";
-        if (prog && prog.percent != null) {
+        if (prog && prog.error) {
+            progText = "⚠ " + prog.error;
+        } else if (prog && prog.percent != null) {
             progText = Math.round(prog.percent) + "%";
         } else if (prog && prog.status) {
             progText = prog.status;
@@ -98,13 +132,13 @@ function renderQueue(items) {
         }
 
         var color = statusColor[item.status] || "#888";
-        html += '<tr id="task-row-' + item.id + '">' +
-            '<td>' + item.id + '</td>' +
+        html += '<tr id="task-row-' + uid + '">' +
+            '<td>' + uid + '</td>' +
             '<td>' + item.task_type + '</td>' +
             '<td style="color:' + color + ';">' + item.status + '</td>' +
             '<td>' + item.position + '</td>' +
-            '<td id="task-prog-' + item.id + '">' + progText + '</td>' +
-            '<td><button type="button" class="cancel-btn" data-id="' + item.id + '" ' +
+            '<td id="task-prog-' + uid + '" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + progText + '">' + progText + '</td>' +
+            '<td><button type="button" class="cancel-btn" data-uid="' + uid + '" ' +
                 'style="font-size:11px;padding:4px 8px;background:#c62828;color:#fff;' +
                 'border:none;border-radius:3px;cursor:pointer;">✕ Отменить</button></td>' +
             '</tr>';
@@ -114,11 +148,11 @@ function renderQueue(items) {
     // Привязка кнопок отмены
     document.querySelectorAll(".cancel-btn").forEach(function(btn) {
         btn.addEventListener("click", function() {
-            var id = btn.getAttribute("data-id");
-            if (!confirm("Отменить задачу #" + id + "?")) return;
+            var uid = btn.getAttribute("data-uid");
+            if (!confirm("Отменить задачу #" + uid + "?")) return;
             btn.disabled = true;
             btn.textContent = "⏳";
-            fetch("/run/api/task/" + id + "/cancel", { method: "POST" })
+            fetch("/run/api/task/" + encodeURIComponent(uid) + "/cancel", { method: "POST" })
                 .then(function(r) { return r.json(); })
                 .then(function() { poll(); })
                 .catch(function(err) { alert("❌ " + err); poll(); });
@@ -128,12 +162,14 @@ function renderQueue(items) {
 
 function loadProgress(items) {
     items.forEach(function(item) {
-        fetch("/run/api/task/" + item.id + "/progress")
+        var uid = item.task_uid;
+        if (uid == null) return;
+        fetch("/run/api/task/" + encodeURIComponent(uid) + "/progress")
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 if (!data.error) {
-                    progressCache[item.id] = data;
-                    var cell = document.getElementById("task-prog-" + item.id);
+                    progressCache[uid] = data;
+                    var cell = document.querySelector('[id="task-prog-' + uid + '"]');
                     if (cell && data.percent != null) {
                         cell.textContent = Math.round(data.percent) + "%";
                     } else if (cell && data.status) {
@@ -159,6 +195,8 @@ function poll() {
             loadProgress(data);
         })
         .catch(function(err) { showError(err); });
+
+    loadHistory();   // ← добавить
 }
 
 // Кнопки воркера
@@ -175,6 +213,91 @@ document.getElementById("btn-resume").addEventListener("click", function() {
         .catch(function(err) { showError(err); });
 });
 document.getElementById("btn-refresh").addEventListener("click", poll);
+
+// --- История ---
+function fmtTs(iso) {
+    if (!iso) return "—";
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    var hh = String(d.getHours()).padStart(2, "0");
+    var mm = String(d.getMinutes()).padStart(2, "0");
+    var ss = String(d.getSeconds()).padStart(2, "0");
+    return d.toLocaleDateString("ru-RU") + " " + hh + ":" + mm + ":" + ss;
+}
+
+function renderHistory(items) {
+    var body = document.getElementById("history-body");
+    var msgEl = document.getElementById("history-msg");
+
+    if (!Array.isArray(items)) {
+        msgEl.textContent = "ошибка: " + (items && items.error ? items.error : "некорректный ответ");
+        msgEl.style.color = "#c62828";
+        return;
+    }
+    msgEl.textContent = "Всего: " + items.length;
+    msgEl.style.color = "#888";
+
+    if (items.length === 0) {
+        body.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#999;padding:20px;">История пуста</td></tr>';
+        return;
+    }
+
+    // Новые сверху
+    var sorted = items.slice().sort(function(a, b) {
+        return (b.finished_at || b.started_at || "") > (a.finished_at || a.started_at || "") ? 1 : -1;
+    });
+
+    var color = statusColor;
+    var html = "";
+    sorted.forEach(function(item) {
+        var dur = item.duration_seconds != null ? Math.round(item.duration_seconds) : "—";
+        html += '<tr>' +
+            '<td>' + (item.task_uid != null ? item.task_uid : "—") + '</td>' +
+            '<td>' + item.task_type + '</td>' +
+            '<td style="color:' + (color[item.status] || "#888") + ';">' + item.status + '</td>' +
+            '<td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#c62828;" title="' + (item.error || "") + '">' + (item.error || "—") + '</td>' +
+            '<td>' + fmtTs(item.started_at) + '</td>' +
+            '<td>' + fmtTs(item.finished_at) + '</td>' +
+            '<td>' + dur + '</td>' +
+            '</tr>';
+    });
+    body.innerHTML = html;
+}
+
+function loadHistory() {
+    fetch("/run/api/history")
+        .then(function(r) { return r.json(); })
+        .then(renderHistory)
+        .catch(function(err) {
+            var msgEl = document.getElementById("history-msg");
+            msgEl.textContent = err;
+            msgEl.style.color = "#c62828";
+        });
+}
+
+// Очистка истории
+document.getElementById("btn-history-clear").addEventListener("click", function() {
+    var isoLocal = document.getElementById("history-before").value;
+    if (!isoLocal) {
+        alert("Укажи дату (datetime-local)");
+        return;
+    }
+    // datetime-local даёт "2026-10-01T00:00", добавляем секунды для ISO
+    var iso = isoLocal + ":00";
+    if (!confirm("Очистить историю до " + iso + "?")) return;
+
+    fetch("/run/api/history/clear", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ before: iso })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.error) { alert("❌ " + data.error); }
+        loadHistory();
+    })
+    .catch(function(err) { alert("❌ " + err); });
+});
 
 // Первый запуск + опрос каждые 2 секунды
 poll();

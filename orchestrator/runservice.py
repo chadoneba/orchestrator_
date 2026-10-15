@@ -34,8 +34,8 @@ def _duration_to_seconds(value):
     return parts[0]
 
 
-def build_logo_params(session):
-    """Сессия -> тело POST /queue (TranscodeLogoParams). None, если нет клипов."""
+def build_logo_payload(session):
+    """Сессия -> тело POST /queue (QueueCreate + task_uid). None, если нет клипов."""
     clips = [c for c in session.clips if c.file_path]
     if not clips:
         return None
@@ -54,7 +54,7 @@ def build_logo_params(session):
 
     output_path = os.path.join(_ready_folder(session), f"{session.external_id}.mp4")
 
-    return {
+    payload = {
         "task_type": "transcode_logo",
         "params": {
             "segments": segments,
@@ -63,6 +63,12 @@ def build_logo_params(session):
             "total_duration": total,
         },
     }
+
+    # task_uid = external_id сессии (строка). None -> сервис сгенерирует сам.
+    if session.external_id is not None:
+        payload["task_uid"] = str(session.external_id)
+
+    return payload
 
 
 # ------------------------------------------------------------------
@@ -108,17 +114,17 @@ def api_worker_resume():
     return jsonify(data)
 
 
-@run_bp.route("/api/task/<int:task_id>/progress")
-def api_progress(task_id):
-    data, err = _call("GET", f"/queue/{task_id}/progress")
+@run_bp.route("/api/task/<string:task_uid>/progress")
+def api_progress(task_uid):
+    data, err = _call("GET", f"/queue/{task_uid}/progress")
     if err:
         return jsonify({"error": err}), 502
     return jsonify(data)
 
 
-@run_bp.route("/api/task/<int:task_id>/cancel", methods=["POST"])
-def api_cancel(task_id):
-    data, err = _call("DELETE", f"/queue/{task_id}")
+@run_bp.route("/api/task/<string:task_uid>/cancel", methods=["POST"])
+def api_cancel(task_uid):
+    data, err = _call("DELETE", f"/queue/{task_uid}")
     if err:
         return jsonify({"error": err}), 502
     return jsonify(data)
@@ -130,11 +136,33 @@ def api_cancel(task_id):
 @run_bp.route("/api/send/<int:session_id>", methods=["POST"])
 def api_send(session_id):
     session = Session.query.get_or_404(session_id)
-    params = build_logo_params(session)
-    print(params)
-    if params is None:
+    payload = build_logo_payload(session)
+    if payload is None:
         return jsonify({"error": "Нет клипов с file_path"}), 400
-    data, err = _call("POST", "/queue", json=params)
+    data, err = _call("POST", "/queue", json=payload)
     if err:
         return jsonify({"error": err}), 502
     return jsonify(data)
+
+# ------------------------------------------------------------------
+# История выполненных задач
+# ------------------------------------------------------------------
+@run_bp.route("/api/history")
+def api_history():
+    data, err = _call("GET", "/history")
+    if err:
+        return jsonify({"error": err}), 502
+    return jsonify(data)
+
+
+@run_bp.route("/api/history/clear", methods=["POST"])
+def api_history_clear():
+    body = request.get_json(silent=True) or {}
+    before = body.get("before")
+    if not before:
+        return jsonify({"error": "before (ISO-дата) обязателен"}), 400
+    data, err = _call("DELETE", f"/history?before={before}")
+    if err:
+        return jsonify({"error": err}), 502
+    # DELETE /history возвращает пустое тело или {}
+    return jsonify(data if data is not None else {"ok": True})

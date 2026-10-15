@@ -827,11 +827,12 @@ if (btnSendRun) {
         fetch("/run/api/send/" + sessionId, { method: "POST" })
             .then(function(r) { return r.json(); })
             .then(function(data) {
-                this && (btnSendRun.disabled = false, btnSendRun.textContent = orig);
+                btnSendRun.disabled = false;
+                btnSendRun.textContent = orig;
                 if (data.error) {
                     alert("❌ " + data.error);
                 } else {
-                    alert("✅ Отправлено в очередь: ID=" + data.id + ", статус=" + data.status);
+                    alert("✅ Отправлено в очередь: uid=" + data.task_uid + ", статус=" + data.status);
                     window.open("/run/", "_blank");
                 }
             })
