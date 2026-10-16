@@ -1,5 +1,5 @@
 import json as json_module
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, current_app
 from models import db, Session, Course, Clip, ConcatJob, Command, SessionUpdated, Room, Performer
 from parsers import MathNetParser, parse_rooms, parse_time_start
 from datetime import datetime, date, time as dt_time
@@ -7,6 +7,7 @@ import os
 import re
 from flask import jsonify
 import requests
+from config import ConfigKey
 
 bp = Blueprint("main", __name__)
 
@@ -830,8 +831,6 @@ import re as _re
 # ------------------------------------------------------------------
 # Конфиг команд
 # ------------------------------------------------------------------
-LOGO_PATH = "/Users/mikhailmaltsev/develop/test_path/logo_left_1080.png"
-
 
 def _extract_number(filename: str) -> int:
     """00777.MTS → 777"""
@@ -915,12 +914,14 @@ def build_transcode_commands(session: Session) -> str:
         ss = f"-s {clip.start_time}" if clip.start_time else ""
         dd = f"-d {clip.duration}" if clip.duration else ""
 
+        logo_path = current_app.config[ConfigKey.LOGO_PATH]
+
         parts.append(
             f"python transcode.py "
             f'-v "{file_full}" '
             f"{ss}"
             f"{dd}"
-            f'-lg "{LOGO_PATH}" '
+            f'-lg "{logo_path}" '
             f'-o "{out_full}"'
         )
 

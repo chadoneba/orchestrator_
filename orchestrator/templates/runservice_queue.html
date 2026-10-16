@@ -20,22 +20,9 @@
 </div>
 
 <!-- ОЧЕРЕДЬ -->
-<table>
-    <thead>
-        <tr>
-            <th>ID</th>
-            <th>Тип</th>
-            <th>Короткое имя</th>
-            <th>Статус</th>
-            <th>Позиция</th>
-            <th>Прогресс</th>
-            <th></th>
-        </tr>
-    </thead>
-    <tbody id="queue-body">
-        <tr><td colspan="6" style="text-align:center;color:#999;padding:20px;">⏳ Загружаю очередь…</td></tr>
-    </tbody>
-</table>
+<div id="queue-groups">
+    <div style="text-align:center;color:#999;padding:20px;">⏳ Загружаю очередь…</div>
+</div>
 
 <!-- ИСТОРИЯ -->
 <div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:12px;margin-top:15px;">
@@ -53,12 +40,12 @@
         <thead>
             <tr>
                 <th>UID</th>
+                <th>Группа</th>
                 <th>Тип</th>
                 <th>Статус</th>
                 <th>Ошибка</th>
-                <th>Начало</th>
-                <th>Конец</th>
-                <th>Длит. (с)</th>
+                <th>Длит.</th>
+                <th>Общая</th>
             </tr>
         </thead>
         <tbody id="history-body">
@@ -68,6 +55,7 @@
 </div>
 
 <script>
+
 var QUEUE_URL = "/run/api/queue";
 var WORKER_URL = "/run/api/worker/status";
 
@@ -90,6 +78,15 @@ function showError(msg) {
     box.textContent = "❌ " + msg;
 }
 
+// --- Формат mm:ss ---
+function fmtDuration(seconds) {
+    if (seconds == null || isNaN(seconds)) return "—";
+    var m = Math.floor(seconds / 60);
+    var s = Math.floor(seconds % 60);
+    return String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+}
+
+// --- Воркер ---
 function renderWorker(data) {
     var el = document.getElementById("worker-status");
     if (data.error) {
@@ -103,47 +100,89 @@ function renderWorker(data) {
     el.style.color = data.paused ? "#f57f17" : "#2e7d32";
 }
 
+// --- Очередь (группы + этапы) ---
 function renderQueue(items) {
-    var body = document.getElementById("queue-body");
+    var container = document.getElementById("queue-groups");
+    showError(null);
+
     if (!Array.isArray(items)) {
         showError(items && items.error ? items.error : "Некорректный ответ /queue");
         return;
     }
-    showError(null);
 
     if (items.length === 0) {
-        body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999;padding:20px;">Очередь пуста</td></tr>';
+        container.innerHTML = '<div style="text-align:center;color:#999;padding:20px;">Очередь пуста</div>';
         return;
     }
 
-    var html = "";
+    // Группируем по group_id
+    var groups = {};
     items.forEach(function(item) {
-        var uid = item.task_uid != null ? item.task_uid : "—";
-        var prog = progressCache[uid];
-        var progText = "";
-        if (prog && prog.error) {
-            progText = "⚠ " + prog.error;
-        } else if (prog && prog.percent != null) {
-            progText = Math.round(prog.percent) + "%";
-        } else if (prog && prog.status) {
-            progText = prog.status;
-        } else {
-            progText = "…";
-        }
-
-        var color = statusColor[item.status] || "#888";
-        html += '<tr id="task-row-' + uid + '">' +
-            '<td>' + uid + '</td>' +
-            '<td>' + item.task_type + '</td>' +
-            '<td style="color:' + color + ';">' + item.status + '</td>' +
-            '<td>' + item.position + '</td>' +
-            '<td id="task-prog-' + uid + '" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + progText + '">' + progText + '</td>' +
-            '<td><button type="button" class="cancel-btn" data-uid="' + uid + '" ' +
-                'style="font-size:11px;padding:4px 8px;background:#c62828;color:#fff;' +
-                'border:none;border-radius:3px;cursor:pointer;">✕ Отменить</button></td>' +
-            '</tr>';
+        var gid = item.group_id;
+        if (!groups[gid]) groups[gid] = [];
+        groups[gid].push(item);
     });
-    body.innerHTML = html;
+
+    // Сортируем группы по минимальной position
+    var groupIds = Object.keys(groups).map(Number);
+    groupIds.sort(function(a, b) {
+        var minA = Math.min.apply(null, groups[a].map(function(it) { return it.position; }));
+        var minB = Math.min.apply(null, groups[b].map(function(it) { return it.position; }));
+        return minA - minB;
+    });
+
+    var html = "";
+
+    groupIds.forEach(function(gid) {
+        var tasks = groups[gid];
+        tasks.sort(function(a, b) { return a.position - b.position; });
+
+        html += '<div style="background:#fff;border:1px solid #e0e0e0;' +
+                'border-radius:8px;padding:0;margin-bottom:12px;overflow:hidden;">';
+
+        // Заголовок группы
+        html += '<div style="background:#f5f5f5;padding:8px 12px;' +
+                'border-bottom:1px solid #e0e0e0;font-weight:600;' +
+                'font-size:13px;display:flex;justify-content:space-between;">' +
+                '<span>📦 Группа #' + gid + '</span>' +
+                '<span style="font-weight:400;color:#888;">' + tasks.length + ' задач(а)</span>' +
+                '</div>';
+
+        // Таблица задач
+        html += '<table style="width:100%;margin:0;">' +
+                '<thead><tr>' +
+                '<th style="width:130px;">UID</th>' +
+                '<th>Тип</th>' +
+                '<th>Статус</th>' +
+                '<th style="width:50px;">Поз.</th>' +
+                '<th style="width:200px;">Этапы / Прогресс</th>' +
+                '<th style="width:50px;"></th>' +
+                '</tr></thead>' +
+                '<tbody>';
+
+        tasks.forEach(function(task) {
+            var uid = task.task_uid != null ? task.task_uid : "—";
+            var color = statusColor[task.status] || "#888";
+
+            // Основная строка задачи
+            html += '<tr>' +
+                '<td style="font-family:monospace;font-size:12px;">' + uid + '</td>' +
+                '<td>' + task.task_type + '</td>' +
+                '<td style="color:' + color + ';">' + task.status + '</td>' +
+                '<td style="text-align:center;">' + task.position + '</td>' +
+                '<td style="vertical-align:top;">' +
+                '<div id="task-steps-' + uid + '" style="font-size:12px;color:#888;min-height:48px;">…</div>' +
+                '</td>' +
+                '<td><button type="button" class="cancel-btn" data-uid="' + uid + '" ' +
+                    'style="font-size:11px;padding:4px 8px;background:#c62828;color:#fff;' +
+                    'border:none;border-radius:3px;cursor:pointer;">✕</button></td>' +
+                '</tr>';
+        });
+
+        html += '</tbody></table></div>';
+    });
+
+    container.innerHTML = html;
 
     // Привязка кнопок отмены
     document.querySelectorAll(".cancel-btn").forEach(function(btn) {
@@ -160,71 +199,89 @@ function renderQueue(items) {
     });
 }
 
+// --- Загрузка прогресса и отрисовка этапов ---
 function loadProgress(items) {
     items.forEach(function(item) {
         var uid = item.task_uid;
         if (uid == null) return;
+
         fetch("/run/api/task/" + encodeURIComponent(uid) + "/progress")
             .then(function(r) { return r.json(); })
             .then(function(data) {
-                if (!data.error) {
-                    progressCache[uid] = data;
-                    var cell = document.querySelector('[id="task-prog-' + uid + '"]');
-                    if (cell && data.percent != null) {
-                        cell.textContent = Math.round(data.percent) + "%";
-                    } else if (cell && data.status) {
-                        cell.textContent = data.status;
-                    }
-                }
+                if (data.error) return;
+                progressCache[uid] = data;
+                renderSteps(uid, data);
             })
             .catch(function() {});
     });
 }
 
-function poll() {
-    fetch(WORKER_URL)
-        .then(function(r) { return r.json(); })
-        .then(renderWorker)
-        .catch(function() { renderWorker({ error: "нет соединения" }); });
+function renderSteps(uid, progress) {
+    var cell = document.getElementById("task-steps-" + uid);
+    if (!cell) return;
 
-    fetch(QUEUE_URL)
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            if (data.error) { showError(data.error); return; }
-            renderQueue(data);
-            loadProgress(data);
-        })
-        .catch(function(err) { showError(err); });
+    var steps = progress.steps;
+    if (!Array.isArray(steps) || steps.length === 0) {
+        // Нет этапов — показываем общий прогресс
+        if (progress.percent != null) {
+            cell.textContent = Math.round(progress.percent) + "%";
+        } else if (progress.error) {
+            cell.textContent = "⚠ " + progress.error;
+            cell.style.color = "#c62828";
+        } else {
+            cell.textContent = progress.status || "…";
+        }
+        return;
+    }
 
-    loadHistory();   // ← добавить
+    var html = "";
+    steps.forEach(function(step) {
+        var icon = "";
+        var lineColor = "#888";
+
+        if (step.status === "running") {
+            icon = "▶ ";
+            lineColor = "#42a5f5";
+        } else if (step.status === "done" || step.status === "completed") {
+            icon = "✓ ";
+            lineColor = "#66bb6a";
+        } else if (step.status === "failed") {
+            icon = "✗ ";
+            lineColor = "#ef5350";
+            if (step.error) {
+                icon += step.error + " ";
+            }
+        } else {
+            icon = "○ ";
+        }
+
+        // --- Новое: progress — строка, определяем по суффиксу % ---
+        var detail = "";
+        var raw = step.progress;
+        if (raw != null && typeof raw === "string") {
+            if (raw.endsWith("%")) {
+                detail = raw;
+            } else {
+                var secs = parseFloat(raw);
+                if (!isNaN(secs)) {
+                    detail = fmtDuration(secs);
+                } else {
+                    detail = raw;
+                }
+            }
+        } else {
+            detail = "—";
+        }
+
+        html += '<div style="color:' + lineColor + ';white-space:nowrap;">' +
+                icon + step.short_type + ' <span style="font-family:monospace;">' + detail + '</span>' +
+                '</div>';
+    });
+
+    cell.innerHTML = html;
 }
-
-// Кнопки воркера
-document.getElementById("btn-pause").addEventListener("click", function() {
-    fetch("/run/api/worker/pause", { method: "POST" })
-        .then(function(r) { return r.json(); })
-        .then(function() { poll(); })
-        .catch(function(err) { showError(err); });
-});
-document.getElementById("btn-resume").addEventListener("click", function() {
-    fetch("/run/api/worker/resume", { method: "POST" })
-        .then(function(r) { return r.json(); })
-        .then(function() { poll(); })
-        .catch(function(err) { showError(err); });
-});
-document.getElementById("btn-refresh").addEventListener("click", poll);
 
 // --- История ---
-function fmtTs(iso) {
-    if (!iso) return "—";
-    var d = new Date(iso);
-    if (isNaN(d.getTime())) return iso;
-    var hh = String(d.getHours()).padStart(2, "0");
-    var mm = String(d.getMinutes()).padStart(2, "0");
-    var ss = String(d.getSeconds()).padStart(2, "0");
-    return d.toLocaleDateString("ru-RU") + " " + hh + ":" + mm + ":" + ss;
-}
-
 function renderHistory(items) {
     var body = document.getElementById("history-body");
     var msgEl = document.getElementById("history-msg");
@@ -242,23 +299,22 @@ function renderHistory(items) {
         return;
     }
 
-    // Новые сверху
     var sorted = items.slice().sort(function(a, b) {
-        return (b.finished_at || b.started_at || "") > (a.finished_at || a.started_at || "") ? 1 : -1;
+        return (b.group_id || 0) - (a.group_id || 0);
     });
 
-    var color = statusColor;
     var html = "";
     sorted.forEach(function(item) {
-        var dur = item.duration_seconds != null ? Math.round(item.duration_seconds) : "—";
+        var color = statusColor[item.status] || "#888";
+
         html += '<tr>' +
             '<td>' + (item.task_uid != null ? item.task_uid : "—") + '</td>' +
+            '<td>#' + item.group_id + '</td>' +
             '<td>' + item.task_type + '</td>' +
-            '<td style="color:' + (color[item.status] || "#888") + ';">' + item.status + '</td>' +
+            '<td style="color:' + color + ';">' + item.status + '</td>' +
             '<td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#c62828;" title="' + (item.error || "") + '">' + (item.error || "—") + '</td>' +
-            '<td>' + fmtTs(item.started_at) + '</td>' +
-            '<td>' + fmtTs(item.finished_at) + '</td>' +
-            '<td>' + dur + '</td>' +
+            '<td style="font-family:monospace;">' + fmtDuration(item.duration_seconds) + '</td>' +
+            '<td style="font-family:monospace;">' + fmtDuration(item.total_duration) + '</td>' +
             '</tr>';
     });
     body.innerHTML = html;
@@ -282,7 +338,6 @@ document.getElementById("btn-history-clear").addEventListener("click", function(
         alert("Укажи дату (datetime-local)");
         return;
     }
-    // datetime-local даёт "2026-10-01T00:00", добавляем секунды для ISO
     var iso = isoLocal + ":00";
     if (!confirm("Очистить историю до " + iso + "?")) return;
 
@@ -299,8 +354,43 @@ document.getElementById("btn-history-clear").addEventListener("click", function(
     .catch(function(err) { alert("❌ " + err); });
 });
 
-// Первый запуск + опрос каждые 2 секунды
+// --- Опрос ---
+function poll() {
+    fetch(WORKER_URL)
+        .then(function(r) { return r.json(); })
+        .then(renderWorker)
+        .catch(function() { renderWorker({ error: "нет соединения" }); });
+
+    fetch(QUEUE_URL)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error) { showError(data.error); return; }
+            renderQueue(data);
+            loadProgress(data);
+        })
+        .catch(function(err) { showError(err); });
+
+    loadHistory();
+}
+
+// Кнопки воркера
+document.getElementById("btn-pause").addEventListener("click", function() {
+    fetch("/run/api/worker/pause", { method: "POST" })
+        .then(function(r) { return r.json(); })
+        .then(function() { poll(); })
+        .catch(function(err) { showError(err); });
+});
+document.getElementById("btn-resume").addEventListener("click", function() {
+    fetch("/run/api/worker/resume", { method: "POST" })
+        .then(function(r) { return r.json(); })
+        .then(function() { poll(); })
+        .catch(function(err) { showError(err); });
+});
+document.getElementById("btn-refresh").addEventListener("click", poll);
+
+// Старт
 poll();
 setInterval(poll, 2000);
+
 </script>
 {% endblock %}

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Инструменты{% endblock %}
+{% block content %}
+<h2>🔧 Инструменты</h2>
+
+<div class="tool-cards">
+    {% include "tools/_copy_ready.html" %}
+</div>
+
+<style>
+.tool-card {
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+}
+.tool-card h3 {
+    margin: 0 0 12px 0;
+    font-size: 16px;
+}
+.tool-card .form-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+}
+.tool-card input[type="text"] {
+    flex: 1;
+    min-width: 200px;
+    padding: 6px 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 13px;
+}
+.tool-card button {
+    padding: 6px 14px;
+    border: none;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    background: #1565c0;
+    color: #fff;
+}
+.tool-card button:hover { opacity: 0.9; }
+.tool-card button:disabled { opacity: 0.5; cursor: default; }
+.tool-card .result {
+    margin-top: 8px;
+    font-size: 13px;
+    white-space: pre-wrap;
+    max-height: 200px;
+    overflow-y: auto;
+    background: #fafafa;
+    padding: 8px;
+    border-radius: 4px;
+}
+.tool-card .result.ok { color: #2e7d32; }
+.tool-card .result.err { color: #c62828; }
+</style>
+{% endblock %}

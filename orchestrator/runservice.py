@@ -1,19 +1,18 @@
 import os
 import requests
-from flask import Blueprint, render_template, jsonify, request
+from flask import Blueprint, render_template, jsonify, request, current_app
 
 from models import Session
-from routes import LOGO_PATH, _records_folder, _ready_folder
+from routes import _records_folder, _ready_folder
+from config import ConfigKey
 
 run_bp = Blueprint("runservice", __name__, url_prefix="/run")
-
-# Константа — адрес внешнего сервиса
-RUN_SERVICE_URL = "http://127.0.0.1:8000"
 
 
 def _call(method, path, **kwargs):
     """Универсальный вызов внешнего API. Возвращает (json, None) или (None, error)."""
-    url = f"{RUN_SERVICE_URL}{path}"
+    run_service_url = current_app.config[ConfigKey.RUN_SERVICE_URL]
+    url = f"{run_service_url}{path}"
     try:
         r = requests.request(method, url, timeout=15, **kwargs)
         r.raise_for_status()
@@ -54,11 +53,13 @@ def build_logo_payload(session):
 
     output_path = os.path.join(_ready_folder(session), f"{session.external_id}.mp4")
 
+    logo_path = current_app.config[ConfigKey.LOGO_PATH]
+
     payload = {
         "task_type": "transcode_logo",
         "params": {
             "segments": segments,
-            "logo_path": LOGO_PATH,
+            "logo_path": logo_path,
             "output_path": output_path,
             "total_duration": total,
         },

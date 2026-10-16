@@ -1,0 +1,128 @@
+<div class="tool-card" id="tool-copy-ready">
+    <h3>📁 Скопировать готовые файлы в папку</h3>
+    <div class="form-row">
+        <input type="text" id="copy-dest"
+               placeholder="Например: /Volumes/USB/upload"
+               style="font-family:monospace;font-size:12px;">
+        <button id="btn-check-dest">🔍 Проверить папку</button>
+        <button id="btn-copy-ready" disabled>📋 Копировать</button>
+    </div>
+    <div id="copy-files-info" style="font-size:12px;color:#888;margin-top:4px;"></div>
+    <div id="copy-result" class="result" style="display:none;"></div>
+</div>
+
+<script>
+(function() {
+    var destInput = document.getElementById("copy-dest");
+    var btnCheck = document.getElementById("btn-check-dest");
+    var btnCopy = document.getElementById("btn-copy-ready");
+    var infoEl = document.getElementById("copy-files-info");
+    var resultEl = document.getElementById("copy-result");
+
+    function showResult(msg, isOk) {
+        resultEl.style.display = "block";
+        resultEl.textContent = msg;
+        resultEl.className = "result " + (isOk ? "ok" : "err");
+    }
+
+    // Проверка папки
+    btnCheck.addEventListener("click", function() {
+        var path = destInput.value.trim();
+        if (!path) { showResult("Введите путь", false); return; }
+
+        btnCheck.disabled = true;
+        btnCheck.textContent = "⏳";
+
+        fetch("/tools/api/check-folder", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path: path })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok) {
+                showResult("✅ Папка доступна: " + data.path, true);
+                btnCopy.disabled = false;
+                // Загружаем список ready-сессий
+                return fetch("/tools/api/ready-list")
+                        .then(function(r) { return r.json(); })
+                        .then(function(listData) {
+                            if (listData.sessions && listData.sessions.length > 0) {
+                                var html = '<div style="margin-top:8px;font-size:12px;color:#555;">' +
+                                            '<strong>Готово к копированию: ' + listData.sessions.length + ' файл(ов)</strong>' +
+                                            '<table style="width:100%;margin-top:4px;border-collapse:collapse;">' +
+                                            '<thead><tr>' +
+                                            '<th style="text-align:left;padding:4px;">Сессия</th>' +
+                                            '<th style="text-align:left;padding:4px;">Автор</th>' +
+                                            '<th style="text-align:left;padding:4px;">Файл</th>' +
+                                            '<th style="text-align:center;padding:4px;width:50px;"></th>' +
+                                            '</tr></thead><tbody>';
+
+                                listData.sessions.forEach(function(s) {
+                                    var icon = s.file_exists ? "✅" : "❌";
+                                    html += '<tr>' +
+                                        '<td style="padding:3px 4px;">' + s.name + ' <span style="color:#888;">(' + s.course_name + ')</span></td>' +
+                                        '<td style="padding:3px 4px;">' + s.author + '</td>' +
+                                        '<td style="padding:3px 4px;font-family:monospace;font-size:11px;">' +
+                                        icon + ' ' + s.file_path +
+                                        '</td>' +
+                                        '<td style="text-align:center;padding:3px 4px;">' + (s.file_exists ? "" : "—") + '</td>' +
+                                        '</tr>';            });
+
+                                html += '</tbody></table></div>';            infoEl.innerHTML = html;
+                            } else {
+                                infoEl.innerHTML = "Нет сессий ready_to_upload";
+                            }
+                        });
+            } else {
+                showResult("❌ " + data.error, false);
+                btnCopy.disabled = true;
+                infoEl.textContent = "";
+            }
+        })
+        .catch(function(err) {
+            showResult("❌ Ошибка: " + err, false);
+            btnCopy.disabled = true;
+        })
+        .finally(function() {
+            btnCheck.disabled = false;
+            btnCheck.textContent = "🔍 Проверить папку";
+        });
+    });
+
+    // Копирование
+    btnCopy.addEventListener("click", function() {
+        var path = destInput.value.trim();
+        if (!path) return;
+
+        btnCopy.disabled = true;
+        btnCopy.textContent = "⏳ Копирую…";
+
+        fetch("/tools/api/copy-ready", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ dest: path })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.ok) {
+                showResult("❌ " + data.error, false);
+                return;
+            }
+            var msg = "Скопировано: " + data.copied +
+                      ", пропущено: " + data.skipped;
+            if (data.errors && data.errors.length > 0) {
+                msg += "\nОшибки:\n" + data.errors.join("\n");
+            }
+            showResult(msg, data.errors.length === 0);
+        })
+        .catch(function(err) {
+            showResult("❌ Ошибка: " + err, false);
+        })
+        .finally(function() {
+            btnCopy.disabled = false;
+            btnCopy.textContent = "📋 Копировать";
+        });
+    });
+})();
+</script>
