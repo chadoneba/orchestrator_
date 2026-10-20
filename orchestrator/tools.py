@@ -4,7 +4,7 @@ import shutil
 from flask import Blueprint, render_template, request, jsonify, current_app
 
 from models import Session, Performer
-from routes import _ready_folder
+from api_helpers import _ready_folder
 
 tools_bp = Blueprint("tools", __name__, url_prefix="/tools")
 

@@ -105,7 +105,7 @@
         {% for s in sessions %}
         <tr data-session-id="{{ s.id }}"
             data-status="{{ s.status }}"
-            style="background:{{ attention_color(s) }};">
+            style="background:{{ attention_color(session_status=s.status,session_date=s.date) }};">
             <td style="background:{{ status_color(s.status) }};width:20px;min-width:20px;"></td>
             <td>{{ s.external_id }}</td>
             <td>{{ s.rooms | map(attribute='name') | join(', ') }}</td>

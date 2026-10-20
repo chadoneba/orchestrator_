@@ -3,7 +3,7 @@ import requests
 from flask import Blueprint, render_template, jsonify, request, current_app
 
 from models import Session
-from routes import _records_folder, _ready_folder
+from api_helpers import _records_folder, _ready_folder
 from config import ConfigKey
 
 run_bp = Blueprint("runservice", __name__, url_prefix="/run")

@@ -2,6 +2,7 @@ from flask import Flask
 from flask_migrate import Migrate
 from models import db
 from routes import bp
+from main_api import api_bp
 from runservice import run_bp
 from tools import tools_bp
 from config import load_config
@@ -25,6 +26,7 @@ def create_app():
     app.register_blueprint(bp)
     app.register_blueprint(run_bp)
     app.register_blueprint(tools_bp)
+    app.register_blueprint(api_bp)
 
     with app.app_context():
         from models import Performer
@@ -32,7 +34,7 @@ def create_app():
             db.session.add(Performer(name="owner"))
             db.session.commit()
 
-    from routes import attention_color, status_color
+    from view_helpers import attention_color, status_color
 
     @app.context_processor
     def inject_helpers():
