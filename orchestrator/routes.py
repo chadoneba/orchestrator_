@@ -7,6 +7,7 @@ from flask import jsonify
 import requests
 from view_helpers import attention_color
 from parsers import parse_time_start, parse_rooms, MathNetParser
+from api_helpers import _full_output_path, _extract_number, _full_source_path, _ready_folder, _records_folder, _list_files
 
 bp = Blueprint("main", __name__)
 
