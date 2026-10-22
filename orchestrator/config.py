@@ -12,7 +12,7 @@ class ConfigKey(str, Enum):
 
 def load_config():
     """Читает config.json и возвращает dict."""
-    filepath = os.path.join(os.path.dirname(__file__), "config.json")
+    filepath = os.path.join(os.path.dirname(__file__), "config_prod.json")
     try:
         with open(filepath, "r", encoding="utf-8") as f:
             return json.load(f)

@@ -298,6 +298,11 @@ def _check_course_updates(course: Course) -> dict:
         if not rec:
             continue
 
+        parsed_status = rec.get("status", "")
+
+        if s.status != "done" and parsed_status == "done":
+            s.status = "done"
+
         # time_start
         if s.time_start is None:
             ts = parse_time_start(rec.get("time_range", ""))

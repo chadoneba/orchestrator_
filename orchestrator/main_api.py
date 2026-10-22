@@ -361,9 +361,16 @@ def api_check_all_courses():
         "log": all_log,
     })
 
+from flask import current_app
+import logging
+
 @api_bp.route("/backfill-sessions", methods=["POST"])
 def api_backfill_sessions():
     """Разовый backfill: time_start + rooms для существующих сессий."""
+    logger = current_app.logger
+    # На всякий случай форсируем уровень, чтобы print не потерялся
+    logger.setLevel(logging.DEBUG)
+
     courses = Course.query.filter(Course.source_url != '').all()
 
     if not courses:
@@ -385,18 +392,93 @@ def api_backfill_sessions():
         parsed_by_id = {r["external_id"]: r for r in parsed}
         sessions = Session.query.filter_by(course_id=course.id).all()
 
+        # ── Диагностика ──────────────────────────────────────────
+        logger.info(
+            f"[backfill] Курс: {course.name} | "
+            f"parsed={len(parsed)} | sessions={len(sessions)}"
+        )
+
+        if parsed:
+            sample_parsed_key = next(iter(parsed_by_id))
+            logger.info(
+                f"[backfill] Пример ключа парсера: type={type(sample_parsed_key).__name__} "
+                f"value={sample_parsed_key!r}"
+            )
+
+        if sessions:
+            sample_session_ext_id = sessions[0].external_id
+            logger.info(
+                f"[backfill] Пример external_id из БД: "
+                f"type={type(sample_session_ext_id).__name__} "
+                f"value={sample_session_ext_id!r}"
+            )
+            # Проверяем совпадение ключа
+            if parsed_by_id:
+                hit = parsed_by_id.get(sample_session_ext_id)
+                logger.info(
+                    f"[backfill] Поиск sample external_id в parsed_by_id: "
+                    f"{'НАЙДЕН' if hit else 'НЕ НАЙДЕН'}"
+                )
+                if not hit:
+                    # Попробуем преобразование
+                    as_str = str(sample_session_ext_id)
+                    as_int = None
+                    try:
+                        as_int = int(sample_session_ext_id)
+                    except (ValueError, TypeError):
+                        pass
+                    hit_str = parsed_by_id.get(as_str)
+                    hit_int = parsed_by_id.get(as_int) if as_int is not None else None
+                    logger.info(
+                        f"[backfill] Попытка приведения: "
+                        f"str({sample_session_ext_id!r}) → {'НАЙДЕН' if hit_str else 'нет'} | "
+                        f"int({sample_session_ext_id!r}) → {'НАЙДЕН' if hit_int else 'нет'}"
+                    )
+        # ── Конец диагностики ───────────────────────────────────
+
         for session in sessions:
             rec = parsed_by_id.get(session.external_id)
+            if not rec:
+                # Пробуем str/int-приведение
+                for key_variant in (str(session.external_id),):
+                    rec = parsed_by_id.get(key_variant)
+                    if rec:
+                        logger.debug(
+                            f"[backfill] Найден через str(): "
+                            f"session.external_id={session.external_id!r}"
+                        )
+                        break
+                else:
+                    try:
+                        as_int = int(session.external_id)
+                        rec = parsed_by_id.get(as_int)
+                        if rec:
+                            logger.debug(
+                                f"[backfill] Найден через int(): "
+                                f"session.external_id={session.external_id!r}"
+                            )
+                    except (ValueError, TypeError):
+                        pass
+
             if not rec:
                 continue
 
             changed = []
 
             # --- status ---
+            parsed_status = rec.get("status", "")
+            logger.debug(
+                f"[backfill] session={session.external_id} "
+                f"session.status={session.status!r} "
+                f"parsed.status={parsed_status!r}"
+            )
 
-            if session.status != "done" and rec.get("status", "") == "done":
+            if session.status != "done" and parsed_status == "done":
                 session.status = "done"
                 changed.append("status=done")
+                logger.info(
+                    f"[backfill] СТАТУС ОБНОВЛЁН: {session.external_id} → done"
+                )
 
             # --- time_start ---
             if session.time_start is None:
@@ -426,6 +508,13 @@ def api_backfill_sessions():
                 details.append(f"{session.external_id}: {', '.join(changed)}")
 
         db.session.commit()
+
+    # Итоговая сводка в лог
+    logger.info(
+        f"[backfill] ИТОГО: time_start={total_time}, "
+        f"rooms={total_rooms}, errors={len(errors)}, "
+        f"details_count={len(details)}"
+    )
 
     return jsonify({
         "ok": True,

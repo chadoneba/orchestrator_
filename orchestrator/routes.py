@@ -50,7 +50,7 @@ def dashboard():
         query = query.filter(Session.performer_id == int(performer_filter))
         
 
-    sessions = query.order_by(Session.date.desc(), Session.external_id.desc()).all()
+    sessions = query.order_by(Session.course_id, Session.date.desc()).all()
 
     if color_filter:
         sessions = [s for s in sessions if attention_color(session_status=s.status, session_date=s.date) == color_filter]
