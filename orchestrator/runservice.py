@@ -56,7 +56,7 @@ def build_logo_payload(session):
     logo_path = current_app.config[ConfigKey.LOGO_PATH]
 
     payload = {
-        "task_type": "transcode_logo",
+        "task_type": "transcode_logo_full",
         "params": {
             "segments": segments,
             "logo_path": logo_path,
