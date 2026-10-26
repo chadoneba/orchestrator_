@@ -3,7 +3,7 @@ import requests
 from flask import Blueprint, render_template, jsonify, request, current_app
 
 from models import Session
-from api_helpers import _records_folder, _ready_folder
+from api_helpers import _records_folder, _ready_folder, build_join_remux_payload
 from config import ConfigKey
 
 run_bp = Blueprint("runservice", __name__, url_prefix="/run")
@@ -167,3 +167,14 @@ def api_history_clear():
         return jsonify({"error": err}), 502
     # DELETE /history возвращает пустое тело или {}
     return jsonify(data if data is not None else {"ok": True})
+
+@run_bp.route("/api/send-join/<int:session_id>", methods=["POST"])
+def api_send_join(session_id):
+    session = Session.query.get_or_404(session_id)
+    payload = build_join_remux_payload(session)
+    if payload is None:
+        return jsonify({"error": "Нет pending ConcatJob с ≥2 MTS-файлами"}), 400
+    data, err = _call("POST", "/queue", json=payload)
+    if err:
+        return jsonify({"error": err}), 502
+    return jsonify(data)

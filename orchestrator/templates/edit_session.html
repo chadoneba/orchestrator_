@@ -194,6 +194,8 @@
                         style="background:#c62828;font-size:11px;padding:4px 10px;display:none;">
                     🗑 Удалить выбранные
                 </button>
+                <button type="button" id="btn-send-join" class="btn"
+        style="background:#1565c0;">
                 <span id="concat-jobs-msg" style="font-size:11px;color:#888;"></span>
             </div>
             <div id="concat-jobs-list" style="max-height:200px;overflow-y:auto;
@@ -817,32 +819,43 @@ document.getElementById("btn-concat-delete").addEventListener("click", function(
 });
 
 // --- Отправка транскода с лого во внешнюю очередь ---
-var btnSendRun = document.getElementById("btn-send-run");
-if (btnSendRun) {
-    btnSendRun.addEventListener("click", function() {
-        var orig = this.textContent;
-        this.disabled = true;
-        this.textContent = "⏳ Отправляю…";
 
-        fetch("/run/api/send/" + sessionId, { method: "POST" })
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-                btnSendRun.disabled = false;
-                btnSendRun.textContent = orig;
-                if (data.error) {
-                    alert("❌ " + data.error);
-                } else {
-                    alert("✅ Отправлено в очередь: uid=" + data.task_uid + ", статус=" + data.status);
-                    window.open("/run/", "_blank");
-                }
-            })
-            .catch(function(err) {
-                btnSendRun.disabled = false;
-                btnSendRun.textContent = orig;
-                alert("❌ " + err);
-            });
-    });
+function makeSendButtonHandler(buttonId, url) {
+    return function (sessionId) {
+        var btn = document.getElementById(buttonId);
+        if (!btn) return;
+
+        btn.addEventListener("click", function () {
+            var orig = this.textContent;
+            this.disabled = true;
+            this.textContent = "⏳ Отправляю…";
+
+            fetch(url + sessionId, { method: "POST" })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    btn.disabled = false;
+                    btn.textContent = orig;
+                    if (data.error) {
+                        alert("❌ " + data.error);
+                    } else {
+                        alert("✅ Отправлено в очередь: uid=" + data.task_uid + ", статус=" + data.status);
+                        window.open("/run/", "_blank");
+                    }
+                })
+                .catch(function (err) {
+                    btn.disabled = false;
+                    btn.textContent = orig;
+                    alert("❌ " + err);
+                });
+        });
+    };
 }
+
+var handleJoin = makeSendButtonHandler("btn-send-join", "/run/api/send-join/");
+var handleTranscode = makeSendButtonHandler("btn-send-run", "/run/api/send/");
+
+handleJoin(sessionId);
+handleTranscode(sessionId);
 
 // Автозагрузка при открытии страницы
 loadReadyFiles();

@@ -362,3 +362,49 @@ def _ready_folder(session: Session) -> str:
             os.path.join(session.course.output_file_path, date_folder, "ready")
         )
     return ""
+
+
+from typing import Any, Dict, List, Optional
+
+
+def build_join_remux_payload(session) -> Optional[Dict[str, Any]]:
+    """Собирает payload для task_type='join_remux' из pending ConcatJob.
+
+    Берёт первый pending ConcatJob с ≥2 файлами.
+    Возвращает dict для POST /queue или None, если нечего обрабатывать.
+    """
+    src_folder = _records_folder(session)
+    ext_id = session.external_id
+
+    concat_jobs = [j for j in session.concat_jobs if j.status == "pending"]
+    if not concat_jobs:
+        return None
+
+    concat_job = concat_jobs[0]
+    files = concat_job.get_files()
+    if len(files) < 2:
+        return None
+
+    # Полные пути к MTS
+    mts_paths = [os.path.join(src_folder, f) for f in files]
+
+    # Имя выходного файла
+    nums = [_extract_number(f) for f in files]
+    range_str = f"{min(nums)}_{max(nums)}"
+
+    if concat_job.output_name:
+        base_name = os.path.splitext(concat_job.output_name)[0]
+    else:
+        base_name = f"{ext_id}_joined_{range_str}"
+
+    output_ts = os.path.join(src_folder, f"{base_name}.ts")
+    output_mp4 = os.path.join(src_folder, f"{base_name}.mp4")
+
+    return {
+        "task_type": "join_remux",
+        "params": {
+            "mts_paths": mts_paths,
+            "output_ts_path": output_ts,
+            "output_mp4_path": output_mp4,
+        },
+    }
