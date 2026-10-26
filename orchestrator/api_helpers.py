@@ -400,11 +400,20 @@ def build_join_remux_payload(session) -> Optional[Dict[str, Any]]:
     output_ts = os.path.join(src_folder, f"{base_name}.ts")
     output_mp4 = os.path.join(src_folder, f"{base_name}.mp4")
 
-    return {
-        "task_type": "join_remux",
-        "params": {
-            "mts_paths": mts_paths,
-            "output_ts_path": output_ts,
-            "output_mp4_path": output_mp4,
-        },
-    }
+    payload = {
+            "task_type": "join_remux",
+            "params": {
+                "mts_paths": mts_paths,
+                "output_ts_path": output_ts,
+                "output_mp4_path": output_mp4,
+            },
+        }
+
+    if session.external_id is not None:
+            payload["task_uid"] = str(session.external_id)
+    
+    return payload
+
+    
+
+
