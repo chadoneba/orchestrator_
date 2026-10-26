@@ -7,7 +7,7 @@ from flask import jsonify
 import requests
 from view_helpers import attention_color
 from parsers import parse_time_start, parse_rooms, MathNetParser
-from api_helpers import _full_output_path,  _full_source_path, normalize_path
+from api_helpers import _full_output_path,  _full_source_path, normalize_path, build_transcode_commands
 
 bp = Blueprint("main", __name__)
 
@@ -51,7 +51,7 @@ def dashboard():
         query = query.filter(Session.performer_id == int(performer_filter))
         
 
-    sessions = query.order_by(Session.course_id, Session.date.desc()).all()
+    sessions = query.order_by( Session.date.asc(),Session.course_id,).all()
 
     if color_filter:
         sessions = [s for s in sessions if attention_color(session_status=s.status, session_date=s.date) == color_filter]
