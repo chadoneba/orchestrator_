@@ -839,7 +839,6 @@ function makeSendButtonHandler(buttonId, url) {
                         alert("❌ " + data.error);
                     } else {
                         alert("✅ Отправлено в очередь: uid=" + data.task_uid + ", статус=" + data.status);
-                        window.open("/run/", "_blank");
                     }
                 })
                 .catch(function (err) {
