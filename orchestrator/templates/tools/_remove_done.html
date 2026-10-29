@@ -1,0 +1,119 @@
+<div class="tool-card" id="tool-cleanup-joined">
+    <h3>🧹 Очистить joined-файлы (done-сессии)</h3>
+    <p style="font-size:12px;color:#888;margin-top:0;">
+        Находит .ts и .mp4 файлы, созданные при join'е, для сессий со статусом done.
+    </p>
+
+    <div class="form-row">
+        <button id="btn-scan-joined">🔍 Найти файлы</button>
+        <button id="btn-cleanup-joined" disabled>🗑 Удалить</button>
+    </div>
+
+    <div id="cleanup-files-info" style="font-size:12px;color:#888;margin-top:4px;"></div>
+    <div id="cleanup-result" class="result" style="display:none;"></div>
+</div>
+
+<script>
+(function() {
+    var btnScan = document.getElementById("btn-scan-joined");
+    var btnCleanup = document.getElementById("btn-cleanup-joined");
+    var infoEl = document.getElementById("cleanup-files-info");
+    var resultEl = document.getElementById("cleanup-result");
+
+    function showResult(msg, isOk) {
+        resultEl.style.display = "block";
+        resultEl.textContent = msg;
+        resultEl.className = "result " + (isOk ? "ok" : "err");
+    }
+
+    // Сканирование (dry-run)
+    btnScan.addEventListener("click", function() {
+        btnScan.disabled = true;
+        btnScan.textContent = "⏳";
+
+        fetch("/tools/api/cleanup-joined?dry_run=1")
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.jobs_processed === 0) {
+                    infoEl.innerHTML = "Нет joined-файлов для удаления.";
+                    btnCleanup.disabled = true;
+                    showResult("", true);
+                    return;
+                }
+
+                var totalFiles = 0;
+                var html = '<div style="margin-top:8px;font-size:12px;color:#555;">' +
+                            '<strong>Найдено: ' + data.jobs_processed +
+                            ' джоб(а), ' + data.total_would_delete +
+                            ' файл(ов)</strong>' +
+                            '<table style="width:100%;margin-top:4px;border-collapse:collapse;">' +
+                            '<thead><tr>' +
+                            '<th style="text-align:left;padding:4px;">Сессия</th>' +
+                            '<th style="text-align:left;padding:4px;">Job ID</th>' +
+                            '<th style="text-align:left;padding:4px;">Файлы</th>' +
+                            '</tr></thead><tbody>';
+
+                data.items.forEach(function(item) {
+                    var filesHtml = item.would_delete.map(function(f) {
+                        return '<span style="font-family:monospace;font-size:11px;">' + f + '</span>';
+                    }).join("<br>");
+
+                    html += '<tr>' +
+                        '<td style="padding:3px 4px;">' + item.external_id + '</td>' +
+                        '<td style="padding:3px 4px;color:#888;">' + item.job_id + '</td>' +
+                        '<td style="padding:3px 4px;">' + filesHtml + '</td>' +
+                        '</tr>';
+                });
+
+                html += '</tbody></table></div>';
+                infoEl.innerHTML = html;
+                btnCleanup.disabled = false;
+                showResult("✅ Готово к удалению: " + data.total_would_delete + " файл(ов)", true);
+            })
+            .catch(function(err) {
+                showResult("❌ Ошибка: " + err, false);
+                btnCleanup.disabled = true;
+            })
+            .finally(function() {
+                btnScan.disabled = false;
+                btnScan.textContent = "🔍 Найти файлы";
+            });
+    });
+
+    // Удаление
+    btnCleanup.addEventListener("click", function() {
+        if (!confirm("Удалить найденные joined-файлы? Это действие необратимо.")) {
+            return;
+        }
+
+        btnCleanup.disabled = true;
+        btnCleanup.textContent = "⏳ Удаляю…";
+
+        fetch("/tools/api/cleanup-joined", { method: "POST" })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var msg = "Удалено: " + data.total_deleted +
+                          " файл(ов) из " + data.jobs_processed + " джоб";
+
+                var errors = data.items
+                    .filter(function(i) { return i.error; })
+                    .map(function(i) { return i.external_id + ": " + i.error; });
+
+                if (errors.length > 0) {
+                    msg += "\nОшибки:\n" + errors.join("\n");
+                }
+
+                showResult(msg, errors.length === 0);
+                btnCleanup.disabled = true;
+                btnScan.click(); // пересканируем, чтобы обновить список
+            })
+            .catch(function(err) {
+                showResult("❌ Ошибка: " + err, false);
+            })
+            .finally(function() {
+                btnCleanup.disabled = false;
+                btnCleanup.textContent = "🗑 Удалить";
+            });
+    });
+})();
+</script>

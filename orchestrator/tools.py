@@ -4,7 +4,7 @@ import shutil
 from flask import Blueprint, render_template, request, jsonify, current_app
 
 from models import Session, Performer
-from api_helpers import _ready_folder
+from api_helpers import _ready_folder, _extract_number
 
 tools_bp = Blueprint("tools", __name__, url_prefix="/tools")
 
@@ -103,3 +103,83 @@ def api_ready_list():
         })
 
     return jsonify({"sessions": result})
+
+@tools_bp.route("/api/cleanup-joined", methods=["GET", "POST"])
+def api_cleanup_joined():
+    """Удаляет joined .ts и .mp4 для сессий со статусом done.
+    GET / ?dry_run=1 — показать, что будет удалено.
+    POST — удалить.
+    """
+    from models import Session
+
+    sessions = (
+        Session.query
+        .filter_by(status="done")
+        .order_by(Session.external_id)
+        .all()
+    )
+
+    dry_run = request.args.get("dry_run") == "1" if request.method == "GET" else False
+
+    result = []
+    for s in sessions:
+        src_folder = _ready_folder(s)
+        ext_id = s.external_id
+
+        done_jobs = [j for j in s.concat_jobs if j.status == "done"]
+
+        for job in done_jobs:
+            files = job.get_files()
+            if len(files) < 2:
+                continue
+
+            nums = [_extract_number(f) for f in files]
+            range_str = f"{min(nums)}_{max(nums)}"
+
+            if job.output_name:
+                base_name = os.path.splitext(job.output_name)[0]
+            else:
+                base_name = f"{ext_id}_joined_{range_str}"
+
+            ts_path = os.path.join(src_folder, f"{base_name}.ts")
+            mp4_path = os.path.join(src_folder, f"{base_name}.mp4")
+
+            item = {
+                "external_id": ext_id,
+                "job_id": job.id,
+            }
+
+            if dry_run:
+                would_delete = []
+                if os.path.isfile(ts_path):
+                    would_delete.append(os.path.basename(ts_path))
+                if os.path.isfile(mp4_path):
+                    would_delete.append(os.path.basename(mp4_path))
+                item["would_delete"] = would_delete
+            else:
+                deleted = []
+                for path in [ts_path, mp4_path]:
+                    if os.path.isfile(path):
+                        os.remove(path)
+                        deleted.append(os.path.basename(path))
+                item["deleted"] = deleted
+                item["ts_was_present"] = os.path.basename(ts_path) in deleted
+                item["mp4_was_present"] = os.path.basename(mp4_path) in deleted
+
+            result.append(item)
+
+    if dry_run:
+        total_would_delete = sum(len(r.get("would_delete", [])) for r in result)
+        return jsonify({
+            "dry_run": True,
+            "total_would_delete": total_would_delete,
+            "jobs_processed": len(result),
+            "items": result,
+        })
+    else:
+        total_deleted = sum(len(r.get("deleted", [])) for r in result)
+        return jsonify({
+            "total_deleted": total_deleted,
+            "jobs_processed": len(result),
+            "items": result,
+        })
