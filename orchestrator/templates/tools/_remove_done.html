@@ -50,6 +50,7 @@
                             '<thead><tr>' +
                             '<th style="text-align:left;padding:4px;">Сессия</th>' +
                             '<th style="text-align:left;padding:4px;">Job ID</th>' +
+                            '<th style="text-align:left;padding:4px;">Путь</th>' +
                             '<th style="text-align:left;padding:4px;">Файлы</th>' +
                             '</tr></thead><tbody>';
 
@@ -61,6 +62,7 @@
                     html += '<tr>' +
                         '<td style="padding:3px 4px;">' + item.external_id + '</td>' +
                         '<td style="padding:3px 4px;color:#888;">' + item.job_id + '</td>' +
+                        '<td style="padding:3px 4px;color:#888;">' + item.ts_path_file + '</td>' +
                         '<td style="padding:3px 4px;">' + filesHtml + '</td>' +
                         '</tr>';
                 });

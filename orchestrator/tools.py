@@ -4,7 +4,7 @@ import shutil
 from flask import Blueprint, render_template, request, jsonify, current_app
 
 from models import Session, Performer
-from api_helpers import _ready_folder, _extract_number
+from api_helpers import _ready_folder, _extract_number, _records_folder
 
 tools_bp = Blueprint("tools", __name__, url_prefix="/tools")
 
@@ -123,10 +123,10 @@ def api_cleanup_joined():
 
     result = []
     for s in sessions:
-        src_folder = _ready_folder(s)
+        src_folder = _records_folder(s)
         ext_id = s.external_id
 
-        done_jobs = [j for j in s.concat_jobs if j.status == "done"]
+        done_jobs = [j for j in s.concat_jobs]
 
         for job in done_jobs:
             files = job.get_files()
@@ -147,6 +147,7 @@ def api_cleanup_joined():
             item = {
                 "external_id": ext_id,
                 "job_id": job.id,
+                "ts_path_file": mp4_path,
             }
 
             if dry_run:
